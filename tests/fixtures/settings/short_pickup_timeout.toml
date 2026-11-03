@@ -1,0 +1,14 @@
+# Riders cancel if not picked up within 300 s of requesting
+[simulation]
+max_request_to_pickup_seconds = 300
+pooling_enabled = false
+reassignment_enabled = true
+pickup_dwell_seconds = 0
+dropoff_dwell_seconds = 0
+default_num_requested_seats = 1
+default_num_available_seats = 4
+average_speed_meters_per_second = 10.0
+
+[hooks]
+matching = "reference_test_matcher"
+routing = "straight_line"
