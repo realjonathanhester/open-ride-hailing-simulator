@@ -14,6 +14,7 @@ A deterministic discrete-event simulator that replays rider requests against a f
 - [Simulation loop](#simulation-loop)
 - [Outputs](#outputs)
 - [Worked example](#worked-example)
+- [Testing](#testing)
 
 ## Goal and scope
 
@@ -144,7 +145,7 @@ The simulator calls this whenever a supply's plan changes. The matcher can also 
 | Errors | Unroutable returns an error. The simulator rejects that plan change and logs it |
 | Determinism | Must return the same output for the same input for runs to be reproducible |
 
-Reference implementation: literal straight lines. Distance is the great-circle (haversine) distance between points, duration is that distance divided by `average_speed_meters_per_second`, and each leg is one straight segment. Both are rounded to whole meters and seconds.
+Reference implementation: literal straight lines. Distance is the great-circle (haversine) distance between points, rounded to whole meters. Duration is computed from that rounded distance: `duration_seconds = round(distance_meters / average_speed_meters_per_second)`. Each leg is one straight segment.
 
 ## Matching hook
 
@@ -197,10 +198,10 @@ The matcher sends only the ordered stops. The simulator starts the plan from the
 | `eta_at_assignment_seconds` | Pickup ETA quoted at the final assignment |
 | `driver_arrived_at` | Car reaches the origin |
 | `pickup_at` | Rider boards, after the dwell |
-| `dropoff_at` | Car reaches the destination |
+| `dropoff_at` | Rider gets out, at the end of the dropoff dwell |
 | `wait_seconds` | `pickup_at` minus `requested_at` |
 | `trip_distance_meters` | Distance from pickup to dropoff as driven, including pooling detours |
-| `trip_duration_seconds` | Time from pickup to dropoff, including pooling detours |
+| `trip_duration_seconds` | `dropoff_at` minus `pickup_at`, including pooling detours and the dropoff dwell |
 | `direct_distance_meters` | Distance of the direct route from origin to destination |
 | `detour_ratio` | `trip_distance_meters` divided by `direct_distance_meters` |
 | `pickup_distance_meters` | Distance the car drove to the pickup after the final assignment |
@@ -259,3 +260,11 @@ _Pooling on_
 | Every interval | Batch tick | The matcher is called; an empty result changes nothing |
 | T3 to T6 | Arrivals and dwells | Arrival, pickup and dropoff are logged for R1, then for R2, each row with its driven polyline |
 | End | S1's plan is finished and the queue is empty | The outputs are written |
+
+## Testing
+
+- **Component tests only.** Every test is a [component test](https://martinfowler.com/articles/microservice-testing/#testing-component) (integration or end-to-end): it runs a full simulation from fixture files and makes assertions on the outputs (trips, supply event log, supply summary and run summary). There is no unit-test requirement.
+- **Fixtures.** Each test is a combination of one settings TOML file, one supply CSV and one demand CSV. Fixtures are shared and reused across tests rather than copied per test.
+- **Minimal assertions.** One or two tests assert every field of every output exhaustively to verify correctness. Behavior tests, such as a simple pool, assert only the few things that behavior is about. Less is more.
+- **Hooks.** Tests use the built-in straight-line router and a deterministic reference matcher defined for tests.
+- **Naming and cases.** Fixture layout, naming conventions, landmark coordinates, the reference matcher and the test cases are in [test_specs.md](test_specs.md).
