@@ -4,7 +4,7 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/realjonathanhester/open-ride-hailing-simulator/runner"
+	"github.com/realjonathanhester/ride-hailing-simulator/runner"
 )
 
 // Case 4 (exhaustive).

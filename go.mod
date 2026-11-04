@@ -1,4 +1,4 @@
-module github.com/realjonathanhester/open-ride-hailing-simulator
+module github.com/realjonathanhester/ride-hailing-simulator
 
 go 1.22
 

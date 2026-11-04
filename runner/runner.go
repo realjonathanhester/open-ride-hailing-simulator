@@ -6,12 +6,12 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/realjonathanhester/open-ride-hailing-simulator/matching"
-	"github.com/realjonathanhester/open-ride-hailing-simulator/model"
-	"github.com/realjonathanhester/open-ride-hailing-simulator/plugins/csvio"
-	"github.com/realjonathanhester/open-ride-hailing-simulator/plugins/tomlsettings"
-	"github.com/realjonathanhester/open-ride-hailing-simulator/routing"
-	"github.com/realjonathanhester/open-ride-hailing-simulator/simulator"
+	"github.com/realjonathanhester/ride-hailing-simulator/matching"
+	"github.com/realjonathanhester/ride-hailing-simulator/model"
+	"github.com/realjonathanhester/ride-hailing-simulator/plugins/csvio"
+	"github.com/realjonathanhester/ride-hailing-simulator/plugins/tomlsettings"
+	"github.com/realjonathanhester/ride-hailing-simulator/routing"
+	"github.com/realjonathanhester/ride-hailing-simulator/simulator"
 )
 
 // Output file names written to the output directory.

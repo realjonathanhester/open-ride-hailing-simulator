@@ -4,7 +4,7 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/realjonathanhester/open-ride-hailing-simulator/runner"
+	"github.com/realjonathanhester/ride-hailing-simulator/runner"
 )
 
 // Case 14: trips match case 2, which runs without batch ticks.

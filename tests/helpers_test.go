@@ -17,7 +17,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/realjonathanhester/open-ride-hailing-simulator/runner"
+	"github.com/realjonathanhester/ride-hailing-simulator/runner"
 )
 
 // T is the base time, 2026-01-01 00:00:00 UTC.

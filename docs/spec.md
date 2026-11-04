@@ -1,4 +1,4 @@
-# open-ride-hailing-simulator: Specification
+# ride-hailing-simulator: Specification
 
 A deterministic discrete-event simulator that replays rider requests against a fleet, with pluggable matching, routing, readers and writers.
 
@@ -269,10 +269,10 @@ Two runs are **paired** when `requests_sha256` and `supply_sha256` match. A diff
 ## Command line
 
 ```sh
-orhs run -settings settings.toml -supply supply.csv -requests requests.csv -output out/
+rhs run -settings settings.toml -supply supply.csv -requests requests.csv -output out/
 ```
 
-Flags override the paths in the settings file's `[io]` section. Calling `orhs` with flags and no subcommand still means `run`. The output viewer (`orhs view`) is specified in [tooling_spec.md](tooling_spec.md).
+Flags override the paths in the settings file's `[io]` section. Calling `rhs` with flags and no subcommand still means `run`. The output viewer (`rhs view`) is specified in [tooling_spec.md](tooling_spec.md).
 
 ## Worked example
 

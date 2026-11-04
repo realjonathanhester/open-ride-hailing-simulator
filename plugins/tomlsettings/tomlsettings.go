@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/BurntSushi/toml"
-	"github.com/realjonathanhester/open-ride-hailing-simulator/model"
+	"github.com/realjonathanhester/ride-hailing-simulator/model"
 )
 
 type file struct {

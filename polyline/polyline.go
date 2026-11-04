@@ -5,7 +5,7 @@ import (
 	"math"
 	"strings"
 
-	"github.com/realjonathanhester/open-ride-hailing-simulator/model"
+	"github.com/realjonathanhester/ride-hailing-simulator/model"
 )
 
 // Encode returns the encoded polyline string for points.

@@ -3,7 +3,7 @@ package simulator
 import (
 	"time"
 
-	"github.com/realjonathanhester/open-ride-hailing-simulator/model"
+	"github.com/realjonathanhester/ride-hailing-simulator/model"
 )
 
 func (s *Simulator) match(trigger string) {

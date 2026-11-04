@@ -6,8 +6,8 @@ import (
 	"sort"
 	"strconv"
 
-	"github.com/realjonathanhester/open-ride-hailing-simulator/model"
-	"github.com/realjonathanhester/open-ride-hailing-simulator/polyline"
+	"github.com/realjonathanhester/ride-hailing-simulator/model"
+	"github.com/realjonathanhester/ride-hailing-simulator/polyline"
 )
 
 // Output column orders, exactly as in docs/spec.md.

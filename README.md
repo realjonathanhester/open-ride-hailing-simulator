@@ -1,4 +1,4 @@
-# open-ride-hailing-simulator
+# ride-hailing-simulator
 
 A deterministic, event-driven ride-hailing simulator with pluggable matching, routing, and I/O.
 
@@ -6,7 +6,7 @@ A deterministic, event-driven ride-hailing simulator with pluggable matching, ro
 
 ## Why a simulator?
 
-open-ride-hailing-simulator is a laboratory for fleet management strategies, such as matching, pooling, batching and reassignment, for ride-hailing and autonomous fleets.
+ride-hailing-simulator is a laboratory for fleet management strategies, such as matching, pooling, batching and reassignment, for ride-hailing and autonomous fleets.
 
 ### Production experiments are slow and noisy
 
@@ -46,7 +46,7 @@ Matching algorithms are usually evaluated on private data with private tooling. 
 Requires Go 1.22 or newer.
 
 ```sh
-go run ./cmd/orhs run \
+go run ./cmd/rhs run \
   -settings tests/fixtures/settings/pooling_enabled.toml \
   -supply tests/fixtures/supply/one_car_at_kezar_stadium.csv \
   -requests tests/fixtures/demand/simple_pool.csv \
@@ -72,7 +72,7 @@ Run the component tests with `go test ./...`.
 
 | Path | Contents |
 |---|---|
-| `cmd/orhs` | Command-line entry point |
+| `cmd/rhs` | Command-line entry point |
 | `model` | Shared records and the hook and plugin interfaces |
 | `simulator` | Discrete-event core, plan validation and outputs |
 | `routing` | Straight-line router |

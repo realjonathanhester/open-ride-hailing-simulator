@@ -3,7 +3,7 @@ package tests
 import (
 	"testing"
 
-	"github.com/realjonathanhester/open-ride-hailing-simulator/runner"
+	"github.com/realjonathanhester/ride-hailing-simulator/runner"
 )
 
 // Case 1 (exhaustive).
