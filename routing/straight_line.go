@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/realjonathanhester/open-ride-hailing-simulator/model"
+	"github.com/realjonathanhester/ride-hailing-simulator/model"
 )
 
 // EarthRadiusMeters is the mean Earth radius.

@@ -18,7 +18,7 @@ import (
 	"math"
 	"sort"
 
-	"github.com/realjonathanhester/open-ride-hailing-simulator/model"
+	"github.com/realjonathanhester/ride-hailing-simulator/model"
 )
 
 // Greedy is the greedy nearest-ETA matcher.

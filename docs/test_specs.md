@@ -1,4 +1,4 @@
-# open-ride-hailing-simulator: Test specification
+# ride-hailing-simulator: Test specification
 
 All tests are component tests, as required in [spec.md](spec.md#testing). Each test runs one full simulation from a settings file, a supply file and a demand file, then asserts on the outputs.
 

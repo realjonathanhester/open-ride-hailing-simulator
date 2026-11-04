@@ -8,7 +8,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/realjonathanhester/open-ride-hailing-simulator/model"
+	"github.com/realjonathanhester/ride-hailing-simulator/model"
 )
 
 const (
