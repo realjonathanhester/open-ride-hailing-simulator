@@ -21,6 +21,10 @@ type Config struct {
 	Compare          *Run // optional second run
 	GoogleMapsAPIKey string
 	GoogleMapsMapID  string
+	// Timezone is the resolved IANA zone (see ResolveTimezone); empty means
+	// the browser's local zone. TimezoneSource says where it came from.
+	Timezone       string
+	TimezoneSource string
 }
 
 // Server serves the UI and the JSON API.
@@ -73,6 +77,7 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		"google_maps_api_key": s.config.GoogleMapsAPIKey, "google_maps_map_id": s.config.GoogleMapsMapID,
 		"maps_enabled": s.config.GoogleMapsAPIKey != "", "compare_enabled": s.config.Compare != nil,
 		"simulation_start_at": s.config.Run.startAt(), "page_size": DefaultPageSize,
+		"timezone": s.config.Timezone, "timezone_source": timezoneSource(s.config),
 	})
 }
 
@@ -331,4 +336,14 @@ func (s *Server) handlePlayback(w http.ResponseWriter, r *http.Request) {
 		to = end
 	}
 	writeJSON(w, http.StatusOK, run.Playback(from, to))
+}
+
+func timezoneSource(c Config) string {
+	if c.Timezone == "" {
+		return TimezoneSourceBrowser
+	}
+	if c.TimezoneSource == "" {
+		return TimezoneSourceFlag
+	}
+	return c.TimezoneSource
 }

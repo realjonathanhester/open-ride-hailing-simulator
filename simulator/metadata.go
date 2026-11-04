@@ -16,6 +16,15 @@ const Version = "0.2.0"
 var RunMetadataColumns = []string{"simulator_version", "requests_sha256", "supply_sha256", "settings_sha256", "settings",
 	"simulation_start_at", "simulation_end_at"}
 
+// RunMetadataColumnsFor adds the optional timezone column when the settings set one,
+// so runs without a timezone keep their old run_metadata bytes.
+func RunMetadataColumnsFor(settings model.Settings) []string {
+	if settings.Timezone == "" {
+		return RunMetadataColumns
+	}
+	return append(append([]string{}, RunMetadataColumns...), "timezone")
+}
+
 type canonicalRequest struct {
 	RequestID                     string         `json:"request_id"`
 	RequestedAt                   int64          `json:"requested_at"`
@@ -58,5 +67,9 @@ func (s *Simulator) runMetadata(requests []model.Request, supplies []model.Suppl
 	requestsHash, _ := sha256JSON(canonicalRequests)
 	supplyHash, _ := sha256JSON(canonicalSupplies)
 	settingsHash, settingsJSON := sha256JSON(s.settings)
-	return [][]string{{Version, requestsHash, supplyHash, settingsHash, string(settingsJSON), formatInt(s.startAt), formatInt(s.endAt)}}
+	row := []string{Version, requestsHash, supplyHash, settingsHash, string(settingsJSON), formatInt(s.startAt), formatInt(s.endAt)}
+	if s.settings.Timezone != "" {
+		row = append(row, s.settings.Timezone)
+	}
+	return [][]string{row}
 }

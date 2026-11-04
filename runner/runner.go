@@ -114,7 +114,7 @@ func RunFiles(settingsPath string, paths Paths) (*simulator.Result, error) {
 		{SupplyEventsFile, simulator.SupplyEventColumns, result.SupplyEvents},
 		{SupplySummaryFile, simulator.SupplySummaryColumns, result.SupplySummary},
 		{RunSummaryFile, simulator.RunSummaryColumns, result.RunSummary},
-		{RunMetadataFile, simulator.RunMetadataColumns, result.RunMetadata},
+		{RunMetadataFile, simulator.RunMetadataColumnsFor(settings), result.RunMetadata},
 	}
 	for _, o := range outputs {
 		if err := write(&csvio.Writer{Path: filepath.Join(settings.IO.OutputDirectory, o.name)}, o.columns, o.rows); err != nil {

@@ -15,10 +15,72 @@ async function api(path) {
   if (!response.ok) throw new Error(body.error || body.message || response.statusText);
   return body;
 }
-function offset(epoch) {
-  if (epoch === "" || epoch === undefined || epoch === null) return "";
+// ---------- Time ----------
+// Simulated times are shown as a T+ offset plus the local wall-clock time in
+// the zone the server resolved (config.timezone: -timezone flag, viewer.toml,
+// run_metadata), or the browser's zone when that is empty.
+let timeFormats = null;
+function displayTimezone() { return config.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone; }
+function timeFormat() {
+  if (!timeFormats) {
+    const timeZone = displayTimezone();
+    timeFormats = {
+      full: new Intl.DateTimeFormat("en-US", { timeZone, weekday: "short", month: "short", day: "numeric", year: "numeric",
+        hour: "numeric", minute: "2-digit", second: "2-digit", timeZoneName: "short" }),
+      compact: new Intl.DateTimeFormat("en-US", { timeZone, hour: "numeric", minute: "2-digit", second: "2-digit" }),
+      parts: new Intl.DateTimeFormat("en-US", { timeZone, hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit",
+        hour: "2-digit", minute: "2-digit", second: "2-digit" }),
+    };
+  }
+  return timeFormats;
+}
+// "Wed Jan 7 2026, 5:38:24 AM CST"
+function localFull(epoch) {
+  const p = Object.fromEntries(timeFormat().full.formatToParts(new Date(Number(epoch) * 1000)).map(x => [x.type, x.value]));
+  return `${p.weekday} ${p.month} ${p.day} ${p.year}, ${p.hour}:${p.minute}:${p.second} ${p.dayPeriod} ${p.timeZoneName}`;
+}
+const localCompact = epoch => timeFormat().compact.format(new Date(Number(epoch) * 1000));
+function tOffset(epoch) {
   const t = Number(epoch) - config.simulation_start_at;
-  return `<span title="${escapeHTML(epoch)}">T${t >= 0 ? "+" : ""}${t}</span>`;
+  return `T${t >= 0 ? "+" : ""}${t}`;
+}
+// Plain text for titles and other non-HTML places.
+const timeText = epoch => `${tOffset(epoch)} · ${localFull(epoch)}`;
+// mode "full" (default): T+20304 · Wed Jan 7 2026, 5:38:24 AM CST.
+// mode "compact" for dense tables: T+20304 · 5:38:24 AM, full date in the tooltip.
+function offset(epoch, mode = "full") {
+  if (epoch === "" || epoch === undefined || epoch === null) return "";
+  const title = `${localFull(epoch)} (epoch ${epoch})`;
+  const local = mode === "compact" ? localCompact(epoch) : localFull(epoch);
+  return `<span class="sim-time" title="${escapeHTML(title)}">${tOffset(epoch)} <span class="local-time">· ${escapeHTML(local)}</span></span>`;
+}
+// Wall-clock fields of an epoch in the display zone.
+function zonedParts(epoch) {
+  const p = Object.fromEntries(timeFormat().parts.formatToParts(new Date(epoch * 1000)).map(x => [x.type, Number(x.value)]));
+  return { year: p.year, month: p.month, day: p.day, hour: p.hour % 24, minute: p.minute, second: p.second };
+}
+// Epoch for a wall-clock time in the display zone (two passes settle DST offsets).
+function zonedEpoch(year, month, day, hour, minute, second) {
+  const wanted = Date.UTC(year, month - 1, day, hour, minute, second) / 1000;
+  let guess = wanted;
+  for (let i = 0; i < 2; i++) {
+    const p = zonedParts(guess);
+    guess += wanted - Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second) / 1000;
+  }
+  return guess;
+}
+// Parses jump-box text: "T+600", "600" (offset), an epoch, "17:30[:15]" (local
+// time on the playhead's date) or "2026-01-07 17:30[:15]". Returns null if invalid.
+function parseJump(text, start, now) {
+  const m = text.match(/^T?\+?(-?\d+)$/i);
+  if (m) { const v = Number(m[1]); return /^T/i.test(text) || v < start ? start + v : v; }
+  const local = text.match(/^(?:(\d{4})-(\d{1,2})-(\d{1,2})[ T])?(\d{1,2}):(\d{2})(?::(\d{2}))?\s*([ap]\.?m\.?)?$/i);
+  if (!local) return null;
+  let hour = Number(local[4]);
+  if (local[7]) { if (hour < 1 || hour > 12) return null; hour = hour % 12 + (/^p/i.test(local[7]) ? 12 : 0); }
+  if (hour > 23 || Number(local[5]) > 59 || Number(local[6] || 0) > 59) return null;
+  const day = local[1] ? { year: Number(local[1]), month: Number(local[2]), day: Number(local[3]) } : zonedParts(Math.round(now));
+  return zonedEpoch(day.year, day.month, day.day, hour, Number(local[5]), Number(local[6] || 0));
 }
 function fmt(v) {
   if (v === null || v === undefined || v === "") return "n/a";
@@ -257,7 +319,7 @@ function rowCell(row, column) {
   const v = row[column];
   if (column === "request_id") return `<td>${tripLink(v)}</td>`;
   if (column === "supply_id") return `<td>${supplyLink(v)}</td>`;
-  if (isTimeField(column)) return `<td class="number">${offset(v)}</td>`;
+  if (isTimeField(column)) return `<td class="number">${offset(v, "compact")}</td>`;
   return `<td class="${/^-?[\d.]+$/.test(v) ? "number" : ""}">${escapeHTML(v)}</td>`;
 }
 
@@ -278,7 +340,7 @@ async function dashboardView() {
     <h2>Ridepool Type Breakdown</h2><table><tr><th>Ridepool Type</th><th>Count</th><th>Share</th></tr>${d.ridepool_types.map(r =>
       `<tr><td><a href="/trips?ridepool_type=${encodeURIComponent(r.ridepool_type)}">${escapeHTML(r.ridepool_type)}</a></td><td class="number">${r.count}</td><td class="number">${fmt(r.share)}</td></tr>`).join("")}</table>
     <h2>Requests and Supply over Time (60 s buckets)</h2><table><tr><th>Time</th><th>Open Requests</th><th>Cars by State</th></tr>${d.timeline.map(p =>
-      `<tr><td>${offset(p.at)}</td><td class="number">${p.open_requests}</td><td>${Object.entries(p.cars_by_state).map(([s, n]) => `${label(s)}: ${n}`).join(", ")}</td></tr>`).join("")}</table>
+      `<tr><td>${offset(p.at, "compact")}</td><td class="number">${p.open_requests}</td><td>${Object.entries(p.cars_by_state).map(([s, n]) => `${label(s)}: ${n}`).join(", ")}</td></tr>`).join("")}</table>
     ${lastPoint ? "" : "<p>No timeline.</p>"}`;
 }
 
@@ -358,7 +420,7 @@ async function supplyView(id, query) {
     <section><h2>Trips</h2><table><tr><th>Request</th><th>Status</th><th>Ridepool Type</th><th></th></tr>${v.trips.map(t =>
       `<tr><td>${tripLink(t.request_id)}</td><td>${escapeHTML(t.status)}</td><td>${escapeHTML(t.ridepool_type)}</td><td>${t.reassigned_away ? "reassigned away" : ""}</td></tr>`).join("")}</table></section></div>
     <h2>Timeline</h2><table id="timeline"><tr><th>Time</th><th>Action</th><th>State After</th><th>Request</th><th>Seats in Use</th><th>Odometer (m)</th></tr>
-    ${v.events.map((e, i) => `<tr data-index="${i}" data-at="${e.row.at}" data-request="${escapeHTML(e.row.request_id)}"><td>${offset(e.row.at)}</td><td>${e.plan ? `<details><summary>${e.row.action}</summary>${e.plan.map(p => `${escapeHTML(p.request_id)}.${p.type} eta ${offset(p.eta_at)}`).join("<br>")}</details>` : e.row.action}</td>
+    ${v.events.map((e, i) => `<tr data-index="${i}" data-at="${e.row.at}" data-request="${escapeHTML(e.row.request_id)}"><td>${offset(e.row.at, "compact")}</td><td>${e.plan ? `<details><summary>${e.row.action}</summary>${e.plan.map(p => `${escapeHTML(p.request_id)}.${p.type} eta ${offset(p.eta_at, "compact")}`).join("<br>")}</details>` : e.row.action}</td>
       <td>${escapeHTML(label(e.row.state_after))}</td><td>${tripLink(e.row.request_id)}</td><td class="number">${e.row.seats_in_use}</td><td class="number">${e.row.odometer_meters}</td></tr>`).join("")}</table>`;
   if (at) {
     const rows = [...document.querySelectorAll("#timeline tr[data-at]")];
@@ -386,7 +448,7 @@ async function supplyView(id, query) {
     let rotation = 0;
     const later = v.events.find(e => Number(e.row.at) > Number(at));
     if (later) rotation = heading(v.position_at, { lat: Number(later.row.lat), lng: Number(later.row.lng) }) ?? 0;
-    addIcon(map, v.position_at, "car", { color: stateColors[span ? span.state : "idle"], rotation, title: `Car at ${at}` });
+    addIcon(map, v.position_at, "car", { color: stateColors[span ? span.state : "idle"], rotation, title: `Car at ${timeText(at)}` });
   }
   fit(map);
 }
@@ -447,7 +509,8 @@ async function playbackView(query) {
       ${[1, 10, 60, 300].map(s => `<button class="pb-speed" data-speed="${s}">${s}x</button>`).join("")}
       <input id="pb-slider" type="range" min="${start}" max="${end}" step="1" value="${now}">
       <span id="pb-time"></span>
-      <form id="pb-jump"><input id="pb-jump-input" placeholder="T+600 or epoch" size="14"><button>Go</button></form>
+      <span id="pb-range" class="muted">${escapeHTML(localCompact(start))} – ${escapeHTML(localFull(end))}</span>
+      <form id="pb-jump"><input id="pb-jump-input" placeholder="T+600, 17:30 or 2026-01-07 17:30" title="A T+ offset, an epoch, or a local time (HH:MM[:SS], optionally with YYYY-MM-DD) in ${escapeHTML(displayTimezone())}" size="26"><button>Go</button></form>
       ${config.compare_enabled ? `<label>Run <select id="pb-run"><option value="a">A</option><option value="b">B</option></select></label>` : ""}
     </div>
     <div id="pb-counters" class="playback-counters"></div>
@@ -514,6 +577,7 @@ async function playbackView(query) {
     if (map && !fitted) { fit(map); fitted = true; }
     document.getElementById("pb-time").innerHTML = offset(t);
     document.getElementById("pb-slider").value = t;
+    document.getElementById("pb-slider").title = timeText(t);
     document.getElementById("pb-counters").innerHTML = `Open requests: ${open} · Active trips: ${active} · ` +
       Object.entries(byState).map(([s, n]) => `<span class="swatch" style="background:${stateColors[s]}"></span>${escapeHTML(label(s))}: ${n}`).join(" · ");
   }
@@ -541,10 +605,10 @@ async function playbackView(query) {
   document.getElementById("pb-jump").onsubmit = e => {
     e.preventDefault();
     const text = document.getElementById("pb-jump-input").value.trim();
-    const m = text.match(/^T?\+?(-?\d+)$/i);
-    if (!m) return;
-    const v = Number(m[1]);
-    now = Math.min(Math.max(/^T/i.test(text) || v < start ? start + v : v, start), end);
+    const target = parseJump(text, start, now);
+    document.getElementById("pb-jump-input").classList.toggle("invalid", target === null);
+    if (target === null) return;
+    now = Math.min(Math.max(target, start), end);
     render(); if (!playing) syncURL();
   };
   highlightSpeed();
@@ -585,5 +649,7 @@ window.addEventListener("popstate", route);
 (async () => {
   config = await api("/api/config");
   if (!config.compare_enabled) document.getElementById("compare-link").classList.add("disabled");
+  document.getElementById("tz-label").textContent = `Times in ${displayTimezone()}${config.timezone ? "" : " (browser)"}`;
+  document.getElementById("tz-label").title = `Time zone source: ${config.timezone_source}`;
   route();
 })();

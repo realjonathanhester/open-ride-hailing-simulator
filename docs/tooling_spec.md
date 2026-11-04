@@ -29,7 +29,7 @@ A local web app for exploring simulation outputs, served by the `rhs` binary. It
 ## Running the viewer
 
 ```sh
-rhs view -output out/ [-compare out2/] [-port 8080]
+rhs view -output out/ [-compare out2/] [-port 8080] [-settings viewer.toml] [-timezone America/Chicago]
 ```
 
 | Flag | Meaning |
@@ -37,6 +37,8 @@ rhs view -output out/ [-compare out2/] [-port 8080]
 | `-output` | Output directory of the run to view (required) |
 | `-compare` | A second output directory; enables [run comparison](#4-run-comparison) |
 | `-port` | Port to listen on; default `8080`. Binds to `127.0.0.1` only |
+| `-settings` | Local viewer settings file; default `viewer.toml` (missing is fine) |
+| `-timezone` | IANA zone for local wall-clock times, such as `America/Chicago`; see [Local time](#local-time) |
 
 - The UI (HTML, JS, CSS) is embedded in the binary with `go:embed`, so there is nothing else to install. The server exposes the parsed outputs as JSON under `/api/...` and serves the UI for every other path.
 - Maps use the Google Maps JavaScript API. The API key is read from the `GOOGLE_MAPS_API_KEY` environment variable or from `[viewer] google_maps_api_key` in a local settings file passed with `-settings`. The environment variable wins. An optional Map ID (`GOOGLE_MAPS_MAP_ID` or `[viewer] google_maps_map_id`) enables vector maps and advanced markers; without it the viewer uses raster maps and classic markers.
@@ -47,7 +49,17 @@ rhs view -output out/ [-compare out2/] [-port 8080]
 
 ## Conventions
 
-- Field names, units and timestamps follow [spec.md conventions](spec.md#conventions): `_seconds`, `_meters`, integer epoch seconds and signed decimal lat/lng. Times are shown as offsets from the run start (`T+654`) with the epoch value on hover.
+- Field names, units and timestamps follow [spec.md conventions](spec.md#conventions): `_seconds`, `_meters`, integer epoch seconds and signed decimal lat/lng. Times are shown as offsets from the run start (`T+654`) followed by the local wall-clock time; see [Local time](#local-time).
+### Local time
+
+Every simulated time the viewer shows (playback clock, slider, jump box, the dashboard, trips, supply and comparison tables, trip and supply details, map info windows and event logs) is shown as the `T+` offset and the local wall-clock time with the zone abbreviation:
+
+- Full form, used in details, info windows and the playback clock: `T+20304 · Wed Jan 7 2026, 5:38:24 AM CST`.
+- Compact form, used in dense tables and event logs: `T+20304 · 5:38:24 AM`. The tooltip has the full date and the epoch value.
+- The zone is resolved by the server, first match wins: the `-timezone` flag, then `[viewer] display_timezone` in the viewer settings file, then the run's `run_metadata` `timezone` (from `[simulation] timezone`, see [spec.md](spec.md#settings-file)), then the browser's own zone. Names must be IANA zone names; an unknown name is a startup error.
+- `GET /api/config` returns `timezone` (the resolved IANA name, or empty for the browser's zone) and `timezone_source` (`flag`, `viewer_settings`, `run_metadata` or `browser`). The browser formats times with `Intl.DateTimeFormat` in that zone, and the top bar names the zone in use.
+- With `-compare`, the zone comes from run A.
+
 - `Trips`, `SupplyEvents`, `SupplySummary` and `RunMetadata` mean the output tables of the same names. `completed` means trips with `status = completed`, and `N(x)` is the number of rows in `x`.
 - Percentiles use the nearest-rank method, the same as the run summary.
 - The Go server computes every aggregate and paginates long tables (100 rows per page by default); the browser never loads a whole table.
@@ -236,8 +248,8 @@ TBD. This section will be specified in a later commit. `/decisions` is reserved 
 - **Controls:**
   - Play and pause.
   - Speed multipliers `1x`, `10x`, `60x` and `300x` simulated seconds per wall-clock second. Default `60x`.
-  - A time slider over `[simulation_start_at, simulation_end_at]` for scrubbing, labeled with `T+` offsets.
-  - A jump-to-time box that takes a `T+` offset or an epoch value.
+  - A time slider over `[simulation_start_at, simulation_end_at]` for scrubbing, labeled with `T+` offsets and local times; its tooltip shows the full local time.
+  - A jump-to-time box that takes a `T+` offset, an epoch value, or a local time in the display zone: `17:30`, `5:30 pm` or `17:30:15` on the playhead's local date, or `2026-01-07 17:30` for a given date.
   - The URL keeps `?at=` and `?speed=` in sync when paused, so a moment can be shared.
 - **Cars:**
   - Each car is drawn at its position at the current time, interpolated linearly in lat/lng between consecutive SupplyEvents rows of that car. Between two rows a car drives one straight constant-speed piece or stands still, so this is the same as the supply view's `?at=` and the interpolation rule in [spec.md](spec.md).
@@ -247,7 +259,7 @@ TBD. This section will be specified in a later commit. `/decisions` is reserved 
   - An open request is shown with the origin icon at its origin from `requested_at` until `pickup_at`, or until `canceled_at` or the run end if it was never picked up.
   - An active trip, picked up but not yet dropped off, shows the destination icon at its destination from `pickup_at` until `dropoff_at`.
 - **Info windows:** clicking a car shows its `supply_id`, state and riders aboard, with links to `/supply/{supply_id}?at={now}`. Clicking a request icon shows the request's status and times, with links to `/trips/{request_id}`.
-- **Counters:** the header shows the current `T+` time, open requests, active trips and cars by state.
+- **Counters:** the header shows the current `T+` time and local time, open requests, active trips and cars by state.
 - **Compare:** with `-compare`, a run selector (A or B) switches which run is played. Side-by-side synchronized playback of A and B is future work.
 - **Without a maps key:** the page still has the controls and counters, and the map is replaced by the usual notice.
 
@@ -289,3 +301,4 @@ Google's own POI and transit icons are hidden (`clickableIcons: false`, and on r
 11. **Playback compare:** one run at a time with an A/B selector. Side-by-side synchronized playback is future work.
 12. **Icons:** original inline SVGs (person with a hand raised, checkered flag, top-down car) with no external assets or licenses, used on every map.
 13. **Repositioning:** the viewer shows it as its own state (purple, "Repositioning") on the supply view, the state band, playback cars and counters. The dashboard counts it as idle, the same as the supply summary does.
+14. **Local time:** times show the `T+` offset and the local wall-clock time together; the offset stays because it lines up with spec timings, and wall-clock time is what people read. Zone precedence is flag, viewer settings, run metadata, then browser, so a benchmark can carry its own zone and a person can still override it. The server resolves and validates the IANA name; the browser formats with `Intl.DateTimeFormat`, so no time zone database ships in the UI.

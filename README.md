@@ -91,9 +91,10 @@ Maps need a Google Maps JavaScript API key from `GOOGLE_MAPS_API_KEY` or a local
 [viewer]
 google_maps_api_key = "..."
 google_maps_map_id = "..."  # optional: vector maps and advanced markers
+display_timezone = "America/Chicago"  # optional: zone for local times (default: the run's timezone, then the browser's)
 ```
 
-Without a key every page still works and maps show a notice. Flags: `-output` (required), `-compare`, `-port` (default 8080), `-settings` (default `viewer.toml`).
+Without a key every page still works and maps show a notice. Flags: `-output` (required), `-compare`, `-port` (default 8080), `-settings` (default `viewer.toml`), `-timezone` (IANA zone for local times).
 
 ## Layout
 
