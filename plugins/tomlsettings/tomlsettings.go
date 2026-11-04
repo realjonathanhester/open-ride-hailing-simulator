@@ -28,6 +28,15 @@ type file struct {
 		DriverBehavior string `toml:"driver_behavior"`
 		Routing        string `toml:"routing"`
 	} `toml:"hooks"`
+	OSRM struct {
+		URL                 string `toml:"url"`
+		Profile             string `toml:"profile"`
+		CachePath           string `toml:"cache_path"`
+		DatasetMetadataPath string `toml:"dataset_metadata_path"`
+		DatasetName         string `toml:"dataset_name"`
+		DatasetDate         string `toml:"dataset_date"`
+		DatasetSHA256       string `toml:"dataset_sha256"`
+	} `toml:"osrm"`
 	IO struct {
 		Reader          string `toml:"reader"`
 		Writer          string `toml:"writer"`
@@ -51,6 +60,7 @@ func (r Reader) ReadSettings() (model.Settings, error) {
 		return model.Settings{}, fmt.Errorf("%s: unknown settings %v", r.Path, undecoded)
 	}
 	s := f.Simulation
+	rt := f.OSRM
 	out := model.Settings{
 		MaxRequestToAssignmentSeconds: s.MaxRequestToAssignmentSeconds,
 		MaxRequestToPickupSeconds:     s.MaxRequestToPickupSeconds,
@@ -61,6 +71,10 @@ func (r Reader) ReadSettings() (model.Settings, error) {
 		AverageSpeedMetersPerSecond:   10.0,
 		MatchingHook:                  orDefault(f.Hooks.Matching, "greedy_nearest_eta"),
 		RoutingHook:                   orDefault(f.Hooks.Routing, "straight_line"),
+		OSRM: model.OSRMSettings{
+			URL: rt.URL, Profile: rt.Profile, CachePath: rt.CachePath, DatasetMetadataPath: rt.DatasetMetadataPath,
+			DatasetName: rt.DatasetName, DatasetDate: rt.DatasetDate, DatasetSHA256: rt.DatasetSHA256,
+		},
 		IO: model.IOSettings{
 			Reader: orDefault(f.IO.Reader, "csv"), Writer: orDefault(f.IO.Writer, "csv"),
 			RequestsPath: f.IO.RequestsPath, SupplyPath: f.IO.SupplyPath, OutputDirectory: f.IO.OutputDirectory,

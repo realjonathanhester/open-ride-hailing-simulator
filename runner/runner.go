@@ -3,6 +3,7 @@ package runner
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/realjonathanhester/ride-hailing-simulator/plugins/csvio"
 	"github.com/realjonathanhester/ride-hailing-simulator/plugins/tomlsettings"
 	"github.com/realjonathanhester/ride-hailing-simulator/routing"
+	"github.com/realjonathanhester/ride-hailing-simulator/routing/osrm"
 	"github.com/realjonathanhester/ride-hailing-simulator/simulator"
 )
 
@@ -53,10 +55,32 @@ func NewDriverBehavior(name string) (model.DriverBehavior, error) {
 
 // NewRouter returns a routing hook by name.
 func NewRouter(name string, settings model.Settings) (model.Router, error) {
-	if name == "straight_line" {
+	switch name {
+	case "straight_line":
 		return routing.NewStraightLine(settings.AverageSpeedMetersPerSecond)
+	case "osrm":
+		return newOSRM(settings.OSRM)
 	}
 	return nil, fmt.Errorf("unknown routing hook %q", name)
+}
+
+// newOSRM builds the OSRM router. Dataset fields set directly in [osrm]
+// override the ones read from dataset_metadata_path.
+func newOSRM(rs model.OSRMSettings) (model.Router, error) {
+	var dataset osrm.Dataset
+	if rs.DatasetMetadataPath != "" {
+		d, err := osrm.ReadDatasetMetadata(rs.DatasetMetadataPath)
+		if err != nil {
+			return nil, err
+		}
+		dataset = d
+	}
+	for target, override := range map[*string]string{&dataset.Name: rs.DatasetName, &dataset.Date: rs.DatasetDate, &dataset.SHA256: rs.DatasetSHA256} {
+		if override != "" {
+			*target = override
+		}
+	}
+	return osrm.New(osrm.Options{URL: rs.URL, Profile: rs.Profile, CachePath: rs.CachePath, Dataset: dataset})
 }
 
 // RunFiles reads a TOML settings file, runs the simulation and writes outputs.
@@ -91,6 +115,12 @@ func RunFiles(settingsPath string, paths Paths) (*simulator.Result, error) {
 	router, err := NewRouter(settings.RoutingHook, settings)
 	if err != nil {
 		return nil, err
+	}
+	if closer, ok := router.(io.Closer); ok {
+		defer closer.Close()
+	}
+	if provider, ok := router.(model.RouterMetadataProvider); ok {
+		settings.Router = provider.RouterMetadata()
 	}
 	behavior, err := NewDriverBehavior(settings.DriverBehaviorHook)
 	if err != nil {

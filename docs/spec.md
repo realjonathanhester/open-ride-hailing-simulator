@@ -59,6 +59,16 @@ Replay a time-ordered sequence of rideshare requests against a fleet of supply (
 
 The settings file is TOML. It also names the matching hook, the driver behavior plugin (`[hooks] driver_behavior`, default `simple`), the routing hook, and the reader and writer plugins along with their options, such as file paths or a database connection.
 
+`[hooks] routing = "osrm"` selects the OSRM router; its options live in their own `[osrm]` section:
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `url` | `http://127.0.0.1:5000` | OSRM server |
+| `profile` | `car` | OSRM profile name in the request URL |
+| `cache_path` | none | Optional JSON-lines leg cache, read at start and appended to |
+| `dataset_metadata_path` | none | The `metadata.json` written by `scripts/osrm_setup.sh` |
+| `dataset_name`, `dataset_date`, `dataset_sha256` | from the metadata file | Override or replace the metadata file |
+
 ### Demand (ride requests)
 
 | Field | Type | Notes |
@@ -149,6 +159,27 @@ The simulator calls this whenever a supply's plan changes. The matcher can also 
 | Determinism | Must return the same output for the same input for runs to be reproducible |
 
 Reference implementation: literal straight lines. Distance is the great-circle (haversine) distance between points, rounded to whole meters. Duration is computed from that rounded distance: `duration_seconds = round(distance_meters / average_speed_meters_per_second)`. Each leg is one straight segment.
+
+Optional extensions a router may implement; callers use them when present and fall back to `route` otherwise, so routers that skip them are unaffected:
+
+| Extension | Shape | Use |
+|---|---|---|
+| Estimate | `estimate(start, waypoints, depart_at)` | Same legs, durations and distances as `route`, possibly without polylines. The built-in matcher prices candidate plans with it |
+| Prefetch | `prefetch(sources[], destinations[], depart_at)` | Hint that legs from every source to every destination are about to be asked for. Must not change any result. The built-in matcher sends, per request, every eligible car and planned stop to the request's pickup and dropoff |
+| Metadata | `router_metadata()` | Router name, engine version and road dataset, recorded in `run_metadata` |
+
+### OSRM router
+
+`[hooks] routing = "osrm"` routes on real roads with an [OSRM](https://project-osrm.org/) server, typically one started by `scripts/osrm_setup.sh` (see the README). Austin is the benchmark region.
+
+- **Points.** Every point is rounded to 1e-5 degrees (about 1 m) before it is sent or used as a cache key, so equal inputs make equal requests.
+- **Duration and distance** of a leg always come from `/table` with `annotations=duration,distance`, whether the pair was prefetched in a many-to-many request or fetched alone, so results don't depend on call order. They are rounded to whole seconds and meters, halves away from zero. A leg between equal rounded points is zero.
+- **Polyline** comes from `/route` with `overview=full&geometries=polyline`, which is Google's encoded polyline at precision 5, the same format as our outputs. It is fetched only by `route`, never by `estimate`, and is drawn from the exact stop, along OSRM's road shape, to the exact next stop. Each leg is one segment, so a car moves at the leg's average speed.
+- **Speeds** are the car profile's free-flow speeds. `depart_at` is ignored. Time-of-day speed profiles are future work: the setup script builds with MLD, which takes traffic updates (`osrm-customize --segment-speed-file`) without a full rebuild.
+- **Cache.** An in-memory cache always holds every leg. With `cache_path`, every leg a run actually uses (not every prefetched pair) is also appended to a JSON-lines file whose header names the profile and dataset SHA-256; a file for another dataset is rejected. A rerun with the same inputs then needs no server.
+- **Startup.** The router probes `/nearest` and fails fast with a clear error when the server doesn't answer, unless the cache file has entries, in which case it routes from the cache alone and fails on any leg it doesn't hold.
+- **Errors.** A `null` table entry or `NoRoute` is unroutable.
+- **run_metadata.** `settings` gains a `router` object: `name`, `profile`, `engine_version` (from the setup metadata), `dataset_name`, `dataset_date` and `dataset_sha256` of the cropped `.osm.pbf`. The straight-line router leaves it out, so its settings hashes are unchanged.
 
 ## Matching hook
 
@@ -333,7 +364,7 @@ _Pooling on_
 - **Component tests only.** Every test is a [component test](https://martinfowler.com/articles/microservice-testing/#testing-component) (integration or end-to-end): it runs a full simulation from fixture files and makes assertions on the outputs (trips, supply event log, supply summary and run summary). There is no unit-test requirement.
 - **Fixtures.** Each test is a combination of one settings TOML file, one supply CSV and one demand CSV. Fixtures are shared and reused across tests rather than copied per test.
 - **Minimal assertions.** One or two tests assert every field of every output exhaustively to verify correctness. Behavior tests, such as a simple pool, assert only the few things that behavior is about. Less is more.
-- **Hooks.** Tests use the built-in straight-line router and a deterministic reference matcher defined for tests.
+- **Hooks.** Tests use the built-in straight-line router and a deterministic reference matcher defined for tests. The OSRM router is tested against a fake OSRM server (`httptest`); a test against a real server runs only when `OSRM_URL` is set.
 - **Benchmarks.** Benchmark scenarios built from public data are specified in [benchmark_spec.md](benchmark_spec.md).
 - **Naming and cases.** Fixture layout, naming conventions, landmark coordinates, the reference matcher and the test cases are in [test_specs.md](test_specs.md).
 
@@ -346,3 +377,7 @@ _Pooling on_
 5. **Offline wins.** `offline_at` during a reposition takes the car offline right where it is. Cars never reposition while `going_offline`.
 6. **Minimal hooks.** The interface has two hooks, `on_assignment_offered` and `on_idle`. Declining is supported by the interface but not by any built-in plugin yet. Online and offline decisions are future hooks.
 7. **Timezone is display only.** `[simulation] timezone` never affects results. It is left out of the `settings` JSON and the `run_metadata` columns when unset, so earlier runs keep their bytes and `settings_sha256`. Setting it changes `settings_sha256`, like any other setting.
+8. **Real roads through OSRM.** We call an OSRM server rather than write a Go router: OSRM is fast at many-to-many tables, free, runs offline in Docker and is deterministic for a fixed map and version. The Google Routes API was rejected for cost, latency and live-traffic results that break reproducibility.
+9. **One source for leg costs.** OSRM's `/table` and `/route` can disagree slightly on the same pair, so a leg's duration and distance always come from `/table` and `/route` supplies only the shape. Matcher ETAs and driven times then agree.
+10. **Reproducibility.** Coordinates are rounded to 1e-5 degrees, the map's SHA-256 and OSRM version go into `run_metadata`, and an optional cache file replays a run without a server.
+11. **Austin first.** The road extract is the Geofabrik Texas file cropped to the Austin metro box `-98.20,29.90,-97.33,30.82` (every point in the Austin weekday benchmark plus about 10 km of margin).
