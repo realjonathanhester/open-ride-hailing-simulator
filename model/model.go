@@ -29,8 +29,35 @@ type Settings struct {
 	// Timezone is an optional IANA zone name for showing simulated times as
 	// local wall-clock times. It never affects the simulation; it is left out
 	// of the settings JSON when empty so existing settings hashes don't change.
-	Timezone string     `json:"timezone,omitempty"`
-	IO       IOSettings `json:"-"`
+	Timezone string `json:"timezone,omitempty"`
+	// Router describes the road data behind a non-default router (for
+	// example OSRM's version and map extract). It is left nil for the
+	// straight-line router so existing settings hashes don't change.
+	Router *RouterMetadata `json:"router,omitempty"`
+	OSRM   OSRMSettings    `json:"-"`
+	IO     IOSettings      `json:"-"`
+}
+
+// OSRMSettings holds the [osrm] options of the osrm routing hook.
+type OSRMSettings struct {
+	URL                 string
+	Profile             string
+	CachePath           string
+	DatasetMetadataPath string
+	DatasetName         string
+	DatasetDate         string
+	DatasetSHA256       string
+}
+
+// RouterMetadata identifies the routing engine and road data of a run. It
+// is written to run_metadata inside the settings JSON.
+type RouterMetadata struct {
+	Name          string `json:"name"`
+	Profile       string `json:"profile,omitempty"`
+	EngineVersion string `json:"engine_version,omitempty"`
+	DatasetName   string `json:"dataset_name,omitempty"`
+	DatasetDate   string `json:"dataset_date,omitempty"`
+	DatasetSHA256 string `json:"dataset_sha256,omitempty"`
 }
 
 // IOSettings names the reader and writer plugins and their options.
@@ -79,6 +106,28 @@ type Leg struct {
 // Router is the routing hook.
 type Router interface {
 	Route(start Location, waypoints []Location, departAt int64) ([]Leg, error)
+}
+
+// LegEstimator is an optional Router extension. Estimate returns the same
+// leg durations and distances Route would, but may leave out polylines, so a
+// matcher can price candidate plans cheaply. Routers that don't implement it
+// are called through Route.
+type LegEstimator interface {
+	Estimate(start Location, waypoints []Location, departAt int64) ([]Leg, error)
+}
+
+// LegPrefetcher is an optional Router extension. Prefetch is a hint that the
+// caller is about to ask for legs from each source to each destination, so a
+// router can fetch them in one many-to-many request. It must not change any
+// result Route or Estimate returns.
+type LegPrefetcher interface {
+	Prefetch(sources, destinations []Location, departAt int64) error
+}
+
+// RouterMetadataProvider is an optional Router extension that describes the
+// router for run_metadata.
+type RouterMetadataProvider interface {
+	RouterMetadata() *RouterMetadata
 }
 
 // StopType is pickup or dropoff.
