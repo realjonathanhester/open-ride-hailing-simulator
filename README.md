@@ -68,6 +68,10 @@ Built-in hooks: `routing = "straight_line"` (haversine distance, constant `avera
 
 Run the component tests with `go test ./...`.
 
+## Benchmarks
+
+Realistic benchmark scenarios live in `benchmarks/<name>/`, specified in the [benchmark specification](docs/benchmark_spec.md). The first is [`austin_weekday_10k`](benchmarks/austin_weekday_10k/README.md): 10,000 RideAustin weekday requests and 3,377 driver shifts.
+
 ## Viewing results
 
 `rhs view` serves a local results viewer (dashboard, trips, supply and run comparison) on `127.0.0.1`. See the [tooling specification](docs/tooling_spec.md).
@@ -104,6 +108,7 @@ Without a key every page still works and maps show a notice. Flags: `-output` (r
 | `viewer` | `rhs view` server, aggregation and embedded UI (`viewer/ui`) |
 | `runner` | Wires settings, hooks, readers and writers into one run |
 | `tests` | Component tests and fixtures |
+| `benchmarks` | Benchmark scenarios ([spec](docs/benchmark_spec.md)) |
 
 ## License
 
