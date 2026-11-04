@@ -3,6 +3,7 @@ package tomlsettings
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/BurntSushi/toml"
 	"github.com/realjonathanhester/ride-hailing-simulator/model"
@@ -20,6 +21,7 @@ type file struct {
 		DefaultNumRequestedSeats      *int     `toml:"default_num_requested_seats"`
 		DefaultNumAvailableSeats      *int     `toml:"default_num_available_seats"`
 		AverageSpeedMetersPerSecond   *float64 `toml:"average_speed_meters_per_second"`
+		Timezone                      string   `toml:"timezone"`
 	} `toml:"simulation"`
 	Hooks struct {
 		Matching       string `toml:"matching"`
@@ -63,6 +65,12 @@ func (r Reader) ReadSettings() (model.Settings, error) {
 			Reader: orDefault(f.IO.Reader, "csv"), Writer: orDefault(f.IO.Writer, "csv"),
 			RequestsPath: f.IO.RequestsPath, SupplyPath: f.IO.SupplyPath, OutputDirectory: f.IO.OutputDirectory,
 		},
+	}
+	if s.Timezone != "" {
+		if _, err := time.LoadLocation(s.Timezone); err != nil || s.Timezone == "Local" {
+			return model.Settings{}, fmt.Errorf("%s: [simulation] timezone %q is not an IANA time zone name", r.Path, s.Timezone)
+		}
+		out.Timezone = s.Timezone
 	}
 	if plugin := f.Hooks.DriverBehavior; plugin != "" && plugin != "simple" {
 		out.DriverBehaviorHook = plugin // the default stays empty, see model.Settings

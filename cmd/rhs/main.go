@@ -1,7 +1,7 @@
 // Command rhs runs simulations.
 //
 //	rhs run -settings settings.toml -supply supply.csv -requests requests.csv -output out/
-//	rhs view -output out/ [-compare out2/] [-port 8080] [-settings viewer.toml]
+//	rhs view -output out/ [-compare out2/] [-port 8080] [-settings viewer.toml] [-timezone America/Chicago]
 //
 // For backward compatibility, flags without a subcommand mean "run".
 package main
@@ -54,6 +54,7 @@ func view(args []string) int {
 	compare := flags.String("compare", "", "a second output directory to compare against")
 	port := flags.Int("port", 8080, "port to listen on (127.0.0.1 only)")
 	settings := flags.String("settings", "viewer.toml", "local TOML file with [viewer] google_maps_api_key and google_maps_map_id")
+	timezone := flags.String("timezone", "", "IANA time zone for local wall-clock times (default: [viewer] display_timezone, then the run's timezone, then the browser's)")
 	flags.Parse(args)
 	if *output == "" {
 		flags.Usage()
@@ -77,6 +78,10 @@ func view(args []string) int {
 		return 1
 	}
 	config.GoogleMapsAPIKey, config.GoogleMapsMapID = maps.GoogleMapsAPIKey, maps.GoogleMapsMapID
+	if config.Timezone, config.TimezoneSource, err = viewer.ResolveTimezone(*timezone, maps.DisplayTimezone, run); err != nil {
+		fmt.Fprintln(os.Stderr, "rhs view:", err)
+		return 1
+	}
 	address := fmt.Sprintf("127.0.0.1:%d", *port)
 	if maps.GoogleMapsAPIKey == "" {
 		fmt.Println("rhs view: no Google Maps API key (set GOOGLE_MAPS_API_KEY); maps are disabled")

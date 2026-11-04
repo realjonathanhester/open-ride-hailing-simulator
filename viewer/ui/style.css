@@ -43,3 +43,7 @@ tr.highlight { background: #fff7d6; }
 .map.tall { height: 600px; }
 .rhs-icon { line-height: 0; }
 .rhs-icon-car svg { transform-origin: 50% 50%; }
+.local-time { color: #556; }
+.muted { color: #667; font-size: .85rem; }
+input.invalid { outline: 2px solid #c62828; }
+#tz-label { margin-left: auto; font-size: .8rem; color: #cde; }

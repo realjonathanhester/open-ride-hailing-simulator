@@ -24,9 +24,13 @@ type Settings struct {
 	// DriverBehaviorHook names the driver behavior plugin. Empty means the
 	// default "simple" plugin; it is left out of the settings JSON so runs with
 	// the default keep the settings hash they had before the plugin existed.
-	DriverBehaviorHook string     `json:"driver_behavior_hook,omitempty"`
-	RoutingHook        string     `json:"routing_hook"`
-	IO                 IOSettings `json:"-"`
+	DriverBehaviorHook string `json:"driver_behavior_hook,omitempty"`
+	RoutingHook        string `json:"routing_hook"`
+	// Timezone is an optional IANA zone name for showing simulated times as
+	// local wall-clock times. It never affects the simulation; it is left out
+	// of the settings JSON when empty so existing settings hashes don't change.
+	Timezone string     `json:"timezone,omitempty"`
+	IO       IOSettings `json:"-"`
 }
 
 // IOSettings names the reader and writer plugins and their options.

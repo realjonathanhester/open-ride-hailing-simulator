@@ -55,6 +55,7 @@ Replay a time-ordered sequence of rideshare requests against a fleet of supply (
 | `default_num_requested_seats` | int | 4 | Used when a request leaves it out |
 | `default_num_available_seats` | int | 4 | Used when a supply leaves it out |
 | `average_speed_meters_per_second` | float | router-specific | Used only by the built-in straight-line router |
+| `timezone` | IANA zone name | none | Display only: the zone where the scenario takes place, such as `America/Chicago`. Never changes the simulation. Recorded in run metadata so tools can show local wall-clock times. An unknown name (or `Local`) is an error |
 
 The settings file is TOML. It also names the matching hook, the driver behavior plugin (`[hooks] driver_behavior`, default `simple`), the routing hook, and the reader and writer plugins along with their options, such as file paths or a database connection.
 
@@ -299,9 +300,10 @@ Identifies the run so two runs can be compared as a pair.
 | `requests_sha256` | SHA-256 of the parsed ride requests: records sorted by `request_id` with defaults filled in, as canonical JSON. Reformatting the CSV doesn't change it |
 | `supply_sha256` | SHA-256 of the parsed supply, built the same way and sorted by `supply_id` |
 | `settings_sha256` | SHA-256 of `settings` |
-| `settings` | The settings the run actually used, defaults filled in, as JSON. Reader and writer paths are left out so moving files doesn't change the hash. `driver_behavior_hook` is included only when it isn't the default `simple` |
+| `settings` | The settings the run actually used, defaults filled in, as JSON. Reader and writer paths are left out so moving files doesn't change the hash. `driver_behavior_hook` is included only when it isn't the default `simple`, and `timezone` only when set |
 | `simulation_start_at` | Simulated clock start: the first `requested_at` |
 | `simulation_end_at` | Simulated time of the last processed event (batch ticks excluded) |
+| `timezone` | Optional, last column: the `[simulation] timezone` setting. The column is written only when the setting is set, so runs without it keep the same columns and bytes |
 
 Two runs are **paired** when `requests_sha256` and `supply_sha256` match. A different `settings_sha256` is expected when comparing strategies.
 
@@ -343,3 +345,4 @@ _Pooling on_
 4. **Assignable while repositioning.** A repositioning car can be matched from its interpolated position. An assignment ends the reposition where the car is, with no extra log row; the `plan_updated` row marks it.
 5. **Offline wins.** `offline_at` during a reposition takes the car offline right where it is. Cars never reposition while `going_offline`.
 6. **Minimal hooks.** The interface has two hooks, `on_assignment_offered` and `on_idle`. Declining is supported by the interface but not by any built-in plugin yet. Online and offline decisions are future hooks.
+7. **Timezone is display only.** `[simulation] timezone` never affects results. It is left out of the `settings` JSON and the `run_metadata` columns when unset, so earlier runs keep their bytes and `settings_sha256`. Setting it changes `settings_sha256`, like any other setting.

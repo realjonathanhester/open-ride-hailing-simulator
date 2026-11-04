@@ -22,7 +22,7 @@
 
 ## Reference run
 
-settings.toml: `greedy_nearest_eta`, `straight_line` at 8 m/s, assignment timeout 300 s, pickup timeout 1200 s, dwells 30/15 s, pooling off, reassignment on. Re-run on commit 7a58497 (about 76 s wall time):
+settings.toml: `greedy_nearest_eta`, `straight_line` at 8 m/s, assignment timeout 300 s, pickup timeout 1200 s, dwells 30/15 s, pooling off, reassignment on, `timezone = "America/Chicago"` (display only; it changes the settings hash but not the results). Re-run on commit 7a58497 (about 76 s wall time):
 
 | requests_completed | requests_canceled | canceled_max_request_to_pickup | requests_unserved | median_wait_seconds | p90_wait_seconds | mean_detour_ratio | fleet_utilization |
 |---|---|---|---|---|---|---|---|
