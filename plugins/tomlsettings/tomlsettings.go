@@ -28,6 +28,9 @@ type file struct {
 		DriverBehavior string `toml:"driver_behavior"`
 		Routing        string `toml:"routing"`
 	} `toml:"hooks"`
+	Matching struct {
+		MaxCandidateCars *int `toml:"max_candidate_cars"`
+	} `toml:"matching"`
 	OSRM struct {
 		URL                 string `toml:"url"`
 		Profile             string `toml:"profile"`
@@ -88,6 +91,12 @@ func (r Reader) ReadSettings() (model.Settings, error) {
 	}
 	if plugin := f.Hooks.DriverBehavior; plugin != "" && plugin != "simple" {
 		out.DriverBehaviorHook = plugin // the default stays empty, see model.Settings
+	}
+	if limit := f.Matching.MaxCandidateCars; limit != nil {
+		if *limit < 0 {
+			return model.Settings{}, fmt.Errorf("%s: [matching] max_candidate_cars must be 0 (no limit) or more, got %d", r.Path, *limit)
+		}
+		out.MaxCandidateCars = *limit
 	}
 	if s.PoolingEnabled != nil {
 		out.PoolingEnabled = *s.PoolingEnabled

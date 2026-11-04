@@ -59,6 +59,12 @@ Replay a time-ordered sequence of rideshare requests against a fleet of supply (
 
 The settings file is TOML. It also names the matching hook, the driver behavior plugin (`[hooks] driver_behavior`, default `simple`), the routing hook, and the reader and writer plugins along with their options, such as file paths or a database connection.
 
+The built-in `greedy_nearest_eta` matcher reads one option from a `[matching]` section:
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `max_candidate_cars` | 0 (no limit) | Before asking the router for pickup times, keep only the N cars closest to the request's pickup by haversine distance from each car's current, interpolated position, ties to the lowest `supply_id`. The limit applies separately to open cars (empty plan: idle or repositioning) and to busy cars (a non-empty plan: forward dispatch or pooling), so up to 2N cars are priced per request. It applies on every trigger, including batch ticks and reassignment checks; the request's current car is always priced. Router prefetches cover only the kept cars. 0 prices every car and is left out of the `settings` JSON, so existing runs keep their bytes and `settings_sha256` |
+
 `[hooks] routing = "osrm"` selects the OSRM router; its options live in their own `[osrm]` section:
 
 | Setting | Default | Meaning |
@@ -165,7 +171,7 @@ Optional extensions a router may implement; callers use them when present and fa
 | Extension | Shape | Use |
 |---|---|---|
 | Estimate | `estimate(start, waypoints, depart_at)` | Same legs, durations and distances as `route`, possibly without polylines. The built-in matcher prices candidate plans with it |
-| Prefetch | `prefetch(sources[], destinations[], depart_at)` | Hint that legs from every source to every destination are about to be asked for. Must not change any result. The built-in matcher sends, per request, every eligible car and planned stop to the request's pickup and dropoff |
+| Prefetch | `prefetch(sources[], destinations[], depart_at)` | Hint that legs from every source to every destination are about to be asked for. Must not change any result. The built-in matcher sends, once per call, every eligible car and planned stop to every open pickup and dropoff. With `max_candidate_cars` set it instead sends, once per call, each open request's kept cars, their planned stops and the open pickups and dropoffs to the open pickups, dropoffs and those planned stops, so pooling insertions are covered too. Candidates are ranked against the plans at the start of the call; legs for a candidate that only appears after an earlier assignment in the same call are fetched on demand |
 | Metadata | `router_metadata()` | Router name, engine version and road dataset, recorded in `run_metadata` |
 
 ### OSRM router
@@ -381,3 +387,4 @@ _Pooling on_
 9. **One source for leg costs.** OSRM's `/table` and `/route` can disagree slightly on the same pair, so a leg's duration and distance always come from `/table` and `/route` supplies only the shape. Matcher ETAs and driven times then agree.
 10. **Reproducibility.** Coordinates are rounded to 1e-5 degrees, the map's SHA-256 and OSRM version go into `run_metadata`, and an optional cache file replays a run without a server.
 11. **Austin first.** The road extract is the Geofabrik Texas file cropped to the Austin metro box `-98.20,29.90,-97.33,30.82` (every point in the Austin weekday benchmark plus about 10 km of margin).
+12. **Candidate pruning by straight-line distance.** With OSRM, every matching decision priced every online car, so a full Austin run took over 26 minutes against 75 s on straight lines. `[matching] max_candidate_cars` keeps the N nearest cars by haversine distance before any router call. Haversine is free and ranks cars close to road time in a city, though a car across a river can be pruned even when its road time ties or beats a kept car's. Open and busy cars get separate limits of N each, so a nearby busy car never crowds out every idle car or the other way round. One setting serves both sets because a second knob had no observed use. The default stays 0 (no pruning) so every existing output is byte-identical.

@@ -26,6 +26,12 @@ type Settings struct {
 	// the default keep the settings hash they had before the plugin existed.
 	DriverBehaviorHook string `json:"driver_behavior_hook,omitempty"`
 	RoutingHook        string `json:"routing_hook"`
+	// MaxCandidateCars is the [matching] max_candidate_cars limit: how many
+	// cars, closest by straight-line distance to the pickup, the matcher
+	// prices per request in each candidate set. Zero means no limit; it is
+	// left out of the settings JSON then so existing settings hashes don't
+	// change.
+	MaxCandidateCars int `json:"max_candidate_cars,omitempty"`
 	// Timezone is an optional IANA zone name for showing simulated times as
 	// local wall-clock times. It never affects the simulation; it is left out
 	// of the settings JSON when empty so existing settings hashes don't change.
