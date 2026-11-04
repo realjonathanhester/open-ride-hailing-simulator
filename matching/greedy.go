@@ -72,6 +72,7 @@ func (g *Greedy) Match(in model.MatchInput) []model.PlanChange {
 		ctx.stops[model.Stop{RequestID: r.RequestID, Type: model.Dropoff}] = stopInfo{r.Destination, r.NumRequestedSeats}
 	}
 
+	ctx.prefetch(eligible, work, requests)
 	for _, r := range requests {
 		switch r.Status {
 		case model.StatusRequested:
@@ -122,6 +123,35 @@ func (g *Greedy) Match(in model.MatchInput) []model.PlanChange {
 	}
 	sort.Slice(changes, func(i, j int) bool { return changes[i].SupplyID < changes[j].SupplyID })
 	return changes
+}
+
+// prefetch hints a many-to-many router, once per call, with every leg the
+// open requests' candidate plans can start: from each eligible car, each
+// planned stop and each open pickup to each open pickup and dropoff. It
+// never changes a result.
+func (ctx *matchContext) prefetch(eligible []model.SupplyView, work map[string][]model.Stop, requests []model.RequestView) {
+	prefetcher, ok := ctx.in.Router.(model.LegPrefetcher)
+	if !ok {
+		return
+	}
+	var sources, destinations []model.Location
+	for _, r := range requests {
+		if r.Status != model.StatusRequested && (r.Status != model.StatusAssigned || !ctx.in.Settings.ReassignmentEnabled) {
+			continue
+		}
+		sources = append(sources, r.Origin)
+		destinations = append(destinations, r.Origin, r.Destination)
+	}
+	if len(destinations) == 0 {
+		return
+	}
+	for _, s := range eligible {
+		sources = append(sources, s.Location)
+		for _, stop := range work[s.SupplyID] {
+			sources = append(sources, ctx.stops[stop].location)
+		}
+	}
+	prefetcher.Prefetch(sources, destinations, ctx.in.Now)
 }
 
 // bestInsertion returns the candidate plan with the lowest total duration and
@@ -189,7 +219,11 @@ func (ctx *matchContext) evaluate(s model.SupplyView, plan []model.Stop) (map[mo
 			return nil, 0, false
 		}
 	}
-	legs, err := ctx.in.Router.Route(s.Location, locations, ctx.in.Now)
+	route := ctx.in.Router.Route
+	if estimator, ok := ctx.in.Router.(model.LegEstimator); ok {
+		route = estimator.Estimate
+	}
+	legs, err := route(s.Location, locations, ctx.in.Now)
 	if err != nil {
 		return nil, 0, false
 	}
