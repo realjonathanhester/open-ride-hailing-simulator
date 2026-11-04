@@ -65,8 +65,10 @@ func (s *Simulator) log(c *car, action, requestID string, planned []model.Locati
 	}
 	c.lastRowLocation = location
 	plannedCell, planJSON := "", ""
-	if action == "plan_updated" {
+	if planned != nil {
 		plannedCell = polyline.Encode(planned)
+	}
+	if action == "plan_updated" {
 		cells := []planCell{}
 		for _, stop := range c.stops {
 			cells = append(cells, planCell{stop.RequestID, stop.Type, stop.location.Lat, stop.location.Lng, stop.etaAt})

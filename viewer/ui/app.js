@@ -4,7 +4,7 @@
 
 let config = null;
 const app = document.getElementById("app");
-const stateColors = { idle: "#9e9e9e", en_route: "#1e66d0", on_trip: "#2e9d4f", going_offline: "#f08c00", offline: "#444" };
+const stateColors = { idle: "#9e9e9e", en_route: "#1e66d0", on_trip: "#2e9d4f", going_offline: "#f08c00", repositioning: "#8e44ad", offline: "#444" };
 
 function escapeHTML(v) {
   return String(v ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -38,7 +38,7 @@ const labelOverrides = {
   rider_meters_per_supply_meter: "Rider Meters per Supply Meter", rider_meters_driven_per_supply_meter: "Rider Meters Driven per Supply Meter",
   requests_served_per_supply_hour: "Requests Served per Supply Hour", request_id: "Request", supply_id: "Car",
   max_co_riders: "Max Co-riders", max_riders_aboard: "Max Riders Aboard", ridepool_type: "Ridepool Type",
-  supply_utilization: "Supply Utilization", rider_wait: "Rider Wait", rider_inconvenience: "Rider Inconvenience",
+  supply_utilization: "Supply Utilization", repositioning: "Repositioning", rider_wait: "Rider Wait", rider_inconvenience: "Rider Inconvenience",
 };
 const wordOverrides = { eta: "ETA", p90: "P90", id: "ID", sha256: "SHA-256", a: "A", b: "B" };
 function label(key) {

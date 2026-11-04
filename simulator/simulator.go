@@ -8,6 +8,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/realjonathanhester/ride-hailing-simulator/driverbehavior"
 	"github.com/realjonathanhester/ride-hailing-simulator/model"
 )
 
@@ -15,6 +16,7 @@ const (
 	phaseNone = iota
 	phaseDriving
 	phaseDwelling
+	phaseRepositioning // empty plan, driving to repositionTarget
 )
 
 // Activity classes used for the supply summary.
@@ -76,8 +78,10 @@ type car struct {
 	legRemaining int64 // meters from base to stops[0] while driving
 	legEndAt     int64
 	dwellEndAt   int64
-	stops        []planStop
-	version      int64
+	// repositionTarget is where the car drives while phaseRepositioning.
+	repositionTarget model.Location
+	stops            []planStop
+	version          int64
 
 	aboard     map[string]int
 	seatsInUse int
@@ -100,6 +104,7 @@ type Simulator struct {
 	settings model.Settings
 	router   model.Router
 	matcher  model.Matcher
+	behavior model.DriverBehavior
 
 	requests     map[string]*request
 	requestOrder []string
@@ -120,9 +125,14 @@ type Simulator struct {
 
 // New creates a simulator with the given hooks.
 func New(settings model.Settings, router model.Router, matcher model.Matcher) *Simulator {
-	return &Simulator{settings: settings, router: router, matcher: matcher,
+	return &Simulator{settings: settings, router: router, matcher: matcher, behavior: driverbehavior.Simple{},
 		requests: map[string]*request{}, cars: map[string]*car{},
 		matcherCalls: map[string]int{model.TriggerRequest: 0, model.TriggerSupplyOnline: 0, model.TriggerSupplyOffline: 0, model.TriggerBatchTick: 0}}
+}
+
+// SetDriverBehavior replaces the default simple driver behavior.
+func (s *Simulator) SetDriverBehavior(behavior model.DriverBehavior) {
+	s.behavior = behavior
 }
 
 func validate(settings model.Settings, requests []model.Request, supplies []model.Supply) error {
@@ -302,7 +312,11 @@ func (s *Simulator) apply(e *event) {
 		}
 		s.match(model.TriggerSupplyOffline)
 	case eventArrive:
-		s.arrive(s.cars[e.id])
+		if c := s.cars[e.id]; c.phase == phaseRepositioning {
+			s.arriveReposition(c)
+		} else {
+			s.arrive(c)
+		}
 	case eventDwellDone:
 		s.finishStop(s.cars[e.id])
 	case eventAssignmentDeadline:
@@ -326,12 +340,16 @@ func pick(override, setting *int64) *int64 {
 
 // position returns where the car is now and its odometer, without committing.
 func (s *Simulator) position(c *car) (model.Location, int64) {
-	if c.phase != phaseDriving {
+	if c.phase != phaseDriving && c.phase != phaseRepositioning {
 		return c.baseLocation, c.baseOdometer
+	}
+	to := c.repositionTarget
+	if c.phase == phaseDriving {
+		to = c.stops[0].location
 	}
 	if s.now >= c.legEndAt || c.legRemaining == 0 {
 		if s.now >= c.legEndAt {
-			return c.stops[0].location, c.baseOdometer + c.legRemaining
+			return to, c.baseOdometer + c.legRemaining
 		}
 		return c.baseLocation, c.baseOdometer
 	}
@@ -339,7 +357,6 @@ func (s *Simulator) position(c *car) (model.Location, int64) {
 	duration := c.legEndAt - c.baseAt
 	driven := int64(math.Round(float64(c.legRemaining) * float64(elapsed) / float64(duration)))
 	fraction := float64(driven) / float64(c.legRemaining)
-	to := c.stops[0].location
 	return model.Location{
 		Lat: c.baseLocation.Lat + (to.Lat-c.baseLocation.Lat)*fraction,
 		Lng: c.baseLocation.Lng + (to.Lng-c.baseLocation.Lng)*fraction,
@@ -368,6 +385,8 @@ func (c *car) state() string {
 		return model.StateEnRoute
 	case len(c.stops) > 0:
 		return model.StateOnTrip
+	case c.phase == phaseRepositioning:
+		return model.StateRepositioning
 	}
 	return model.StateIdle
 }
@@ -379,7 +398,7 @@ func (s *Simulator) sync(c *car) {
 	c.classMeters[class] += odometer - c.baseOdometer
 	c.classSeconds[class] += s.now - c.accountedAt
 	c.accountedAt = s.now
-	if c.phase == phaseDriving {
+	if c.phase == phaseDriving || c.phase == phaseRepositioning {
 		c.legRemaining -= odometer - c.baseOdometer
 	}
 	c.baseLocation, c.baseAt, c.baseOdometer = location, s.now, odometer
@@ -395,6 +414,9 @@ func (s *Simulator) dwell(t model.StopType) int64 {
 // replan installs new stops on a synced car, routing from its current location
 // (or from the stop it is dwelling at, which stays first).
 func (s *Simulator) replan(c *car, stops []model.Stop) ([]model.Location, error) {
+	if c.phase == phaseRepositioning {
+		c.phase = phaseNone // any plan change ends a reposition where the car is
+	}
 	newStops := make([]planStop, len(stops))
 	for i, stop := range stops {
 		r := s.requests[stop.RequestID]
@@ -520,13 +542,57 @@ func (s *Simulator) becameEmpty(c *car) {
 		s.goOffline(c)
 	} else {
 		s.log(c, "idle", "", nil)
+		s.reposition(c)
 	}
+}
+
+// driverState is the driver behavior's view of a synced car.
+func (s *Simulator) driverState(c *car) model.DriverState {
+	location, _ := s.position(c)
+	state := model.DriverState{Now: s.now, SupplyID: c.input.SupplyID, State: c.state(), Location: location,
+		OnlineLocation: c.input.OnlineLocation, OnlineAt: c.input.OnlineAt, OfflineAt: c.input.OfflineAt,
+		NumAvailableSeats: c.capacity, SeatsInUse: c.seatsInUse}
+	for _, stop := range c.stops {
+		state.Plan = append(state.Plan, model.Waypoint{RequestID: stop.RequestID, Type: stop.Type, Location: stop.location, EtaAt: stop.etaAt, NumRequestedSeats: stop.seats})
+	}
+	return state
+}
+
+// reposition asks the driver behavior where an idle, synced car should go
+// and, if it names somewhere else, starts driving there.
+func (s *Simulator) reposition(c *car) {
+	if !c.online || c.offline || c.goingOffline || len(c.stops) > 0 {
+		return
+	}
+	target := s.behavior.OnIdle(s.driverState(c))
+	if target == nil || *target == c.baseLocation {
+		return
+	}
+	legs, err := s.route(c.baseLocation, []model.Location{*target})
+	if err != nil {
+		s.log(c, "reposition_rejected", "", nil)
+		return
+	}
+	c.phase, c.repositionTarget = phaseRepositioning, *target
+	c.legRemaining, c.legEndAt = legs[0].DistanceMeters, s.now+legs[0].DurationSeconds
+	c.version++
+	s.push(&event{at: c.legEndAt, priority: priorityDropoff, id: c.input.SupplyID, kind: eventArrive, version: c.version})
+	s.log(c, "reposition_started", "", []model.Location{c.baseLocation, *target})
+}
+
+func (s *Simulator) arriveReposition(c *car) {
+	s.sync(c)
+	c.baseLocation = c.repositionTarget
+	c.phase, c.legRemaining = phaseNone, 0
+	c.version++
+	s.log(c, "reposition_arrived", "", nil)
+	s.reposition(c)
 }
 
 func (s *Simulator) goOffline(c *car) {
 	s.sync(c)
 	at := s.now
-	c.offline, c.goingOffline, c.offlineAt = true, false, &at
+	c.offline, c.goingOffline, c.offlineAt, c.phase = true, false, &at, phaseNone
 	c.version++
 	s.log(c, "offline", "", nil)
 }

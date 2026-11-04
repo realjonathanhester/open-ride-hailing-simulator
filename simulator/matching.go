@@ -201,6 +201,10 @@ func (s *Simulator) applyChanges(changes []model.PlanChange) {
 			s.log(c, "plan_rejected", "", nil)
 			continue
 		}
+		if addsPickup(c, plan) && !s.behavior.OnAssignmentOffered(s.driverState(c), plan) {
+			s.log(c, "plan_declined", "", nil)
+			continue
+		}
 		for _, stop := range c.stops {
 			if stop.Type == model.Pickup {
 				previousOwners[stop.RequestID] = id
@@ -249,4 +253,18 @@ func (s *Simulator) applyChanges(changes []model.PlanChange) {
 			s.cancel(r, "max_request_to_assignment")
 		}
 	}
+}
+
+// addsPickup reports whether a plan has a pickup the car doesn't already have.
+func addsPickup(c *car, plan []model.Stop) bool {
+	current := map[model.Stop]bool{}
+	for _, stop := range c.stops {
+		current[stop.Stop] = true
+	}
+	for _, stop := range plan {
+		if stop.Type == model.Pickup && !current[stop] {
+			return true
+		}
+	}
+	return false
 }

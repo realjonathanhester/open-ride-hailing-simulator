@@ -20,9 +20,13 @@ type Settings struct {
 	DefaultNumAvailableSeats      int     `json:"default_num_available_seats"`
 	AverageSpeedMetersPerSecond   float64 `json:"average_speed_meters_per_second"`
 
-	MatchingHook string     `json:"matching_hook"`
-	RoutingHook  string     `json:"routing_hook"`
-	IO           IOSettings `json:"-"`
+	MatchingHook string `json:"matching_hook"`
+	// DriverBehavior names the driver behavior plugin. Empty means the default
+	// "simple" plugin; it is left out of the settings JSON so runs with the
+	// default keep the settings hash they had before the plugin existed.
+	DriverBehavior string     `json:"driver_behavior,omitempty"`
+	RoutingHook    string     `json:"routing_hook"`
+	IO             IOSettings `json:"-"`
 }
 
 // IOSettings names the reader and writer plugins and their options.
@@ -165,7 +169,39 @@ const (
 	StateEnRoute      = "en_route"
 	StateOnTrip       = "on_trip"
 	StateGoingOffline = "going_offline"
+	// StateRepositioning is an empty-plan car driving to a target its driver
+	// behavior chose. It is assignable and counts as idle time and distance.
+	StateRepositioning = "repositioning"
 )
+
+// DriverState is what a driver behavior sees about one car at one moment.
+type DriverState struct {
+	Now               int64
+	SupplyID          string
+	State             string
+	Location          Location // current, interpolated position
+	OnlineLocation    Location // online_lat and online_lng from the supply input
+	OnlineAt          int64
+	OfflineAt         *int64
+	NumAvailableSeats int
+	SeatsInUse        int
+	Plan              []Waypoint // current plan with ETAs
+}
+
+// DriverBehavior is the driver behavior hook. It decides what a driver does
+// on their own, outside the matcher's plans. Implementations must be
+// deterministic: the same inputs give the same answers.
+type DriverBehavior interface {
+	// OnAssignmentOffered is called before a matcher plan change that adds at
+	// least one new pickup is applied. Returning false declines the whole
+	// change; the car keeps its previous plan and logs plan_declined.
+	OnAssignmentOffered(car DriverState, plan []Stop) bool
+	// OnIdle is called whenever the car's plan becomes empty while it is
+	// online and not going offline (after a dropoff, a cancellation, an
+	// unassignment, or arriving at a reposition target). A non-nil result
+	// starts a reposition to that location; nil stays put.
+	OnIdle(car DriverState) *Location
+}
 
 // SettingsReader returns validated settings.
 type SettingsReader interface {

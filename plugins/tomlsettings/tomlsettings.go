@@ -25,6 +25,9 @@ type file struct {
 		Matching string `toml:"matching"`
 		Routing  string `toml:"routing"`
 	} `toml:"hooks"`
+	DriverBehavior struct {
+		Plugin string `toml:"plugin"`
+	} `toml:"driver_behavior"`
 	IO struct {
 		Reader          string `toml:"reader"`
 		Writer          string `toml:"writer"`
@@ -62,6 +65,9 @@ func (r Reader) ReadSettings() (model.Settings, error) {
 			Reader: orDefault(f.IO.Reader, "csv"), Writer: orDefault(f.IO.Writer, "csv"),
 			RequestsPath: f.IO.RequestsPath, SupplyPath: f.IO.SupplyPath, OutputDirectory: f.IO.OutputDirectory,
 		},
+	}
+	if plugin := f.DriverBehavior.Plugin; plugin != "" && plugin != "simple" {
+		out.DriverBehavior = plugin // the default stays empty, see model.Settings
 	}
 	if s.PoolingEnabled != nil {
 		out.PoolingEnabled = *s.PoolingEnabled

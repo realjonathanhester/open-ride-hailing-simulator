@@ -83,6 +83,7 @@ The first five are used by the current fixtures; the rest are reserved for futur
 | coit_tower → ferry_building | 1314 | 131 |
 | coit_tower → painted_ladies | 3757 | 376 |
 | painted_ladies → union_square | 2583 | 258 |
+| coit_tower → kezar_stadium | 5940 | 594 |
 | union_square → coit_tower | 1608 | 161 |
 
 ## Test cases
@@ -184,3 +185,37 @@ Cases 1 and 4 are the **exhaustive output tests**: they assert every field of ev
 
 - **Fixtures:** `pooling_enabled.toml` and `base_default.toml`, each with `one_car_at_kezar_stadium.csv` and `simple_pool.csv`
 - **Assert:** `requests_sha256` and `supply_sha256` match across the two runs; `settings_sha256` differs.
+
+### Driver behavior
+
+Cases 18 to 23 are in `tests/driver_behavior_test.go`. `return_to_origin.toml` is `base_default.toml` plus `[driver_behavior] plugin = "return_to_origin"`, and `simple_driver_behavior.toml` is `base_default.toml` plus `plugin = "simple"`.
+
+### 18. `simple_driver_behavior_is_the_default`
+
+- **Fixtures:** `base_default.toml` and `simple_driver_behavior.toml`, each with `one_car_at_union_square.csv` and `single_trip.csv`
+- **Assert:** both runs produce byte-identical trips, supply event log, supply summary, run summary (excluding timings) and run metadata, including `settings_sha256`. Every earlier case runs with the default and is unchanged.
+
+### 19. `car_returns_to_origin_after_dropoff`
+
+- **Fixtures:** `return_to_origin.toml`, `one_car_at_kezar_stadium.csv`, `single_trip.csv`
+- **Assert:** after `dropoff` and `idle` at T+654, there's a `reposition_started` row at Coit Tower (`state_after = repositioning`, `planned_polyline` set, `plan` empty). `reposition_arrived` follows at T+1248 at Kezar Stadium (`state_after = idle`, `odometer_meters = 11880`). Supply summary: `idle_seconds = 654` (60 + 594), `idle_meters = 5940`, `on_trip_meters = 5940`. `simulation_end_at = T+1248`.
+
+### 20. `car_is_assigned_mid_reposition_from_interpolated_position`
+
+- **Fixtures:** `return_to_origin.toml`, `one_car_at_kezar_stadium.csv`, `second_trip_requested_mid_return.csv` (`kezar_stadium_to_coit_tower` at T+60, then `coit_tower_to_ferry_building` at T+954)
+- **Assert:** at T+954 the car is 300 s, or 3000 m, into its return. `plan_updated` at T+954 is logged at (37.784652, -122.431540) with `odometer_meters = 8940` and `state_after = en_route`. `coit_tower_to_ferry_building` has `eta_at_assignment_seconds = 300`, `pickup_at = T+1254` and `pickup_distance_meters = 3000`. After its dropoff, the car repositions again from the Ferry Building: 2 `reposition_started` rows and 1 `reposition_arrived`. `idle_meters = 9369` (3000 + 6369), `en_route_meters = 3000`.
+
+### 21. `no_reposition_when_already_at_origin`
+
+- **Fixtures:** `return_to_origin.toml`, `one_car_at_kezar_stadium.csv`, `round_trip_back_to_kezar_stadium.csv` (Kezar Stadium to Coit Tower at T+60, then Coit Tower to Kezar Stadium at T+61, forward-dispatched)
+- **Assert:** the last row is `idle` at T+1248 at Kezar Stadium, with no `reposition_started` rows and `idle_meters = 0`.
+
+### 22. `car_goes_offline_during_reposition`
+
+- **Fixtures:** `return_to_origin.toml`, `one_car_at_kezar_stadium_offline_during_return.csv` (`offline_at = T+954`), `single_trip.csv`
+- **Assert:** the last row is `offline` at T+954 at the interpolated position (37.784652, ...), with `odometer_meters = 8940` and no `reposition_arrived`. Supply summary `offline_at = T+954`, `idle_meters = 3000`.
+
+### 23. `going_offline_car_does_not_reposition`
+
+- **Fixtures:** `return_to_origin.toml`, `one_car_at_kezar_stadium_offline_early.csv`, `single_trip.csv`
+- **Assert:** the last row is `offline` at T+654 at Coit Tower, with no `reposition_started` rows.
