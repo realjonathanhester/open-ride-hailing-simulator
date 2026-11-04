@@ -4,6 +4,43 @@ A deterministic, event-driven ride-hailing simulator with pluggable matching, ro
 
 **Status:** working Go implementation of the [specification](docs/spec.md), with component tests from the [test specification](docs/test_specs.md).
 
+## Why a simulator?
+
+open-ride-hailing-simulator is a laboratory for fleet management strategies, such as matching, pooling, batching and reassignment, for ride-hailing and autonomous fleets.
+
+### Production experiments are slow and noisy
+
+Ride-hailing is a two-sided marketplace, and that breaks standard experimentation:
+
+- **A/B tests are biased.** Riders in treatment and control compete for the same cars. A matcher that grabs nearby cars for its own riders looks great while quietly hurting the control group.
+- **Splitting supply has its own problems.** Giving each arm its own fleet removes that competition, but each half-size fleet behaves differently from the full marketplace, since density drives ETAs and pooling. Riders also see fewer nearby cars, and you need enough supply to split in the first place.
+- **Switchback experiments are underpowered.** Alternating the whole market between strategies over time avoids that interference. But each time block becomes a single data point, so detecting small effects can take weeks.
+- **Experiments are costly.** Every bad variant costs real riders, real drivers and real money.
+
+### A perfect world, on purpose
+
+The simulator makes strong simplifying assumptions: cars drive exactly as the routing engine specifies, pickups are seamless, nobody takes a wrong turn, and every assignment is accepted. Those assumptions will never hold in reality, and that's the point. A deterministic runtime gives you:
+
+- **Repeatable runs.** The same inputs always produce the same outputs, to the second and the meter.
+- **Paired comparisons.** Run two strategies on identical supply and demand, and any difference is caused by the strategy, not by noise.
+- **Speed and cost.** A simulated day of a city takes seconds, not a week of a live market.
+
+The results won't match production numbers. But cheap directional results tell you which ideas deserve an expensive experiment, and which don't.
+
+### Exploring worlds that don't exist yet
+
+Extrapolating from production data is risky when the question is about a very different world. Ride-hailing companies and their investors have made big bets on how a marketplace behaves at scales and with features that no data existed for yet. A simulator lets you ask those questions directly:
+
+- **Scaling.** How much do ETAs drop, and how much does utilization grow, as supply and demand double or grow tenfold?
+- **Upper bounds for features.** How much headroom is there in reassigning a rider to a better car after assignment ("pickup swap"), in pooling, in batching windows, or in riders walking to better pickup spots?
+- **The cost of constraints.** What do seat limits, cancellation timeouts or a no-reassignment policy actually cost in wait time and miles driven?
+
+Knowing the upper bound tells you whether a feature is worth building before anyone builds it.
+
+### A shared benchmark
+
+Matching algorithms are usually evaluated on private data with private tooling. An open, deterministic simulator with plugin readers, writers and matchers gives researchers and engineers a common place to compare ideas and reproduce each other's results.
+
 ## Usage
 
 Requires Go 1.22 or newer.
