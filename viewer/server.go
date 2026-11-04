@@ -44,6 +44,7 @@ func NewServer(config Config) *Server {
 	s.mux.HandleFunc("GET /api/compare/trips", s.handleCompareTrips)
 	s.mux.HandleFunc("GET /api/compare/trips/{request_id}", s.handleCompareTrip)
 	s.mux.HandleFunc("GET /api/decisions", s.handleDecisions)
+	s.mux.HandleFunc("GET /api/playback", s.handlePlayback)
 	s.mux.HandleFunc("GET /api/", func(w http.ResponseWriter, r *http.Request) { writeError(w, http.StatusNotFound, "unknown endpoint") })
 	s.mux.HandleFunc("GET /", s.handleIndex)
 	return s
@@ -293,4 +294,41 @@ func (s *Server) handleCompareTrip(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleDecisions(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusNotImplemented, map[string]string{"status": "not_implemented",
 		"message": "Matching decisions are TBD; see docs/tooling_spec.md section 5."})
+}
+
+func (s *Server) handlePlayback(w http.ResponseWriter, r *http.Request) {
+	run, ok := s.run(w, r)
+	if !ok {
+		return
+	}
+	query := r.URL.Query()
+	from := run.startAt()
+	if v := query.Get("from"); v != "" {
+		parsed, err := strconv.ParseInt(v, 10, 64)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "from must be an integer epoch")
+			return
+		}
+		from = parsed
+	}
+	to := from + DefaultPlaybackWindowSeconds
+	if v := query.Get("to"); v != "" {
+		parsed, err := strconv.ParseInt(v, 10, 64)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "to must be an integer epoch")
+			return
+		}
+		to = parsed
+	}
+	if to < from {
+		writeError(w, http.StatusBadRequest, "to is before from")
+		return
+	}
+	if to > from+MaxPlaybackWindowSeconds {
+		to = from + MaxPlaybackWindowSeconds
+	}
+	if end := run.endAt(); to > end && end >= from {
+		to = end
+	}
+	writeJSON(w, http.StatusOK, run.Playback(from, to))
 }

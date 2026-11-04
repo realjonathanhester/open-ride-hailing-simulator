@@ -33,3 +33,13 @@ tr.highlight { background: #fff7d6; }
 .legend li { margin: .15rem 0; }
 .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; }
 .info { font-size: .8rem; } .info table td { padding: 1px 6px 1px 0; border: 0; }
+
+/* Playback and map icons */
+.playback-controls { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 8px; }
+.playback-controls #pb-slider { flex: 1 1 300px; }
+.playback-controls form { display: inline-flex; gap: 4px; }
+.pb-speed.active { font-weight: bold; outline: 2px solid #1e66d0; }
+.playback-counters { margin-bottom: 8px; }
+.map.tall { height: 600px; }
+.rhs-icon { line-height: 0; }
+.rhs-icon-car svg { transform-origin: 50% 50%; }

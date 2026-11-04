@@ -98,6 +98,50 @@ function metricTable(metrics) {
   }).join("")}</table>`;
 }
 
+// ---------- Icons ----------
+// Original inline SVGs drawn for this project (tooling spec "Map icons").
+const icons = {
+  origin: () => `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="36" viewBox="0 0 28 36">
+    <ellipse cx="14" cy="34" rx="7" ry="1.6" fill="#000" opacity=".25"/>
+    <circle cx="12" cy="7" r="4" fill="#1e66d0" stroke="#fff" stroke-width="1.2"/>
+    <path d="M7 13h10l-1 10h-1.5l-.8 10h-2.6l-.6-8-.6 8H7.3l-.8-10H5z" fill="#1e66d0" stroke="#fff" stroke-width="1.2" stroke-linejoin="round"/>
+    <path d="M16.5 14.5 22 6.5" stroke="#1e66d0" stroke-width="3" stroke-linecap="round"/>
+    <circle cx="22.6" cy="5.4" r="2" fill="#f2c9a0" stroke="#1e66d0" stroke-width="1"/>
+    <path d="M7.5 14.5 4.5 21" stroke="#1e66d0" stroke-width="3" stroke-linecap="round"/></svg>`,
+  destination: () => `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="36" viewBox="0 0 28 36">
+    <ellipse cx="6" cy="34" rx="5" ry="1.4" fill="#000" opacity=".25"/>
+    <rect x="4.5" y="2" width="2.6" height="32" rx="1" fill="#333"/>
+    <g transform="translate(7 3)"><rect width="18" height="13.5" fill="#fff" stroke="#222" stroke-width="1"/>
+    ${[0, 1, 2].map(row => [0, 1, 2, 3].map(col => (row + col) % 2 ? "" : `<rect x="${col * 4.5}" y="${row * 4.5}" width="4.5" height="4.5" fill="#222"/>`).join("")).join("")}</g></svg>`,
+  car: (color = "#1e66d0") => `<svg xmlns="http://www.w3.org/2000/svg" width="22" height="34" viewBox="0 0 22 34">
+    <rect x="2" y="2" width="18" height="30" rx="6" fill="${color}" stroke="#fff" stroke-width="1.5"/>
+    <path d="M5 10q6-4 12 0l-1 5H6z" fill="#cfe3ff" stroke="#123" stroke-width=".6"/>
+    <path d="M6 24h10l1 4q-6 2-12 0z" fill="#cfe3ff" stroke="#123" stroke-width=".6"/>
+    <rect x="4" y="2.8" width="4" height="2" rx="1" fill="#fff6b0"/><rect x="14" y="2.8" width="4" height="2" rx="1" fill="#fff6b0"/>
+    <rect x="4.5" y="29.4" width="3.5" height="1.6" rx=".8" fill="#ff5a5a"/><rect x="14" y="29.4" width="3.5" height="1.6" rx=".8" fill="#ff5a5a"/></svg>`,
+};
+const iconAnchors = { origin: [14, 34], destination: [6, 34], car: [11, 17] };
+const svgURL = svg => "data:image/svg+xml;charset=UTF-8," + encodeURIComponent(svg);
+function carColor(state, riders) { return state === "on_trip" && riders >= 2 ? "#17602f" : stateColors[state] || "#444"; }
+// heading in degrees clockwise from north, in lat/lng space corrected for latitude.
+function heading(from, to) {
+  const dx = (to.lng - from.lng) * Math.cos(from.lat * Math.PI / 180), dy = to.lat - from.lat;
+  if (Math.abs(dx) < 1e-12 && Math.abs(dy) < 1e-12) return null;
+  return Math.atan2(dx, dy) * 180 / Math.PI;
+}
+function iconElement(kind, { color, rotation = 0 } = {}) {
+  const div = document.createElement("div");
+  div.className = `rhs-icon rhs-icon-${kind}`;
+  div.innerHTML = kind === "car" ? icons.car(color) : icons[kind]();
+  if (kind === "car") div.firstElementChild.style.transform = `rotate(${rotation}deg)`;
+  return div;
+}
+// classic markers can't rotate an image, so the car SVG is rotated inside itself.
+function rotatedCarSVG(color, rotation) {
+  return icons.car(color).replace('viewBox="0 0 22 34">', `width="34" height="34" viewBox="-6 0 34 34"><g transform="rotate(${rotation} 11 17)">`).replace(/<\/svg>$/, "</g></svg>")
+    .replace('width="22" height="34" ', "");
+}
+
 // ---------- Maps ----------
 let mapsReady = null;
 function loadMaps() {
@@ -121,7 +165,12 @@ async function makeMap(element) {
     element.textContent = "Maps are disabled: set GOOGLE_MAPS_API_KEY or [viewer] google_maps_api_key in viewer.toml.";
     return null;
   }
-  const options = { zoom: 13, center: { lat: 37.78, lng: -122.42 } };
+  // Hide Google's own POI and transit pins: they look like our icons (the purple
+  // "Painted Ladies" attraction pin sits right on a pickup in the SF fixtures).
+  const options = { zoom: 13, center: { lat: 37.78, lng: -122.42 }, clickableIcons: false };
+  if (!config.google_maps_map_id) options.styles = [
+    { featureType: "poi", elementType: "labels.icon", stylers: [{ visibility: "off" }] },
+    { featureType: "transit", elementType: "labels.icon", stylers: [{ visibility: "off" }] }];
   if (config.google_maps_map_id) options.mapId = config.google_maps_map_id;
   const map = new google.maps.Map(element, options);
   map.__bounds = new google.maps.LatLngBounds();
@@ -140,25 +189,45 @@ function drawLine(map, points, color, { dashed = false, weight = 4, opacity = 0.
   return new google.maps.Polyline(line);
 }
 let infoWindow = null;
-function addMarker(map, point, label, title, info) {
+// addIcon places one of the project icons; opts: { color, rotation, info, title }.
+function addIcon(map, point, kind, { color, rotation = 0, info, title = "", extend = true } = {}) {
   if (!map || !point) return null;
   const position = { lat: point.lat, lng: point.lng };
-  map.__bounds.extend(position);
+  if (extend) map.__bounds.extend(position);
+  let marker;
   if (config.google_maps_map_id && google.maps.marker) {
-    const pin = new google.maps.marker.PinElement({ glyph: label });
-    const marker = new google.maps.marker.AdvancedMarkerElement({ map, position, title, content: pin.element, gmpClickable: !!info });
-    bindInfo(map, marker, info);
-    return marker;
+    const content = iconElement(kind, { color, rotation });
+    if (kind === "car") content.style.transform = "translateY(50%)"; // anchor at center, not bottom
+    marker = new google.maps.marker.AdvancedMarkerElement({ map, position, title, content, gmpClickable: !!info });
+    marker.__kind = "advanced";
+  } else {
+    marker = new google.maps.Marker({ map, position, title, icon: iconFor(kind, color, rotation) });
   }
-  const marker = new google.maps.Marker({ map, position, label, title });
+  marker.__info = info;
   bindInfo(map, marker, info);
   return marker;
 }
+function iconFor(kind, color, rotation) {
+  if (kind === "car") return { url: svgURL(rotatedCarSVG(color, rotation)), scaledSize: new google.maps.Size(34, 34), anchor: new google.maps.Point(17, 17) };
+  const [x, y] = iconAnchors[kind];
+  return { url: svgURL(icons[kind]()), scaledSize: new google.maps.Size(28, 36), anchor: new google.maps.Point(x, y) };
+}
+function moveIcon(marker, point, color, rotation) {
+  if (marker.__kind === "advanced") {
+    marker.position = point;
+    marker.content.innerHTML = icons.car(color);
+    marker.content.firstElementChild.style.transform = `rotate(${rotation}deg)`;
+  } else {
+    marker.setPosition(point);
+    marker.setIcon(iconFor("car", color, rotation));
+  }
+}
+function removeIcon(marker) { if (marker.__kind === "advanced") marker.map = null; else marker.setMap(null); }
 function bindInfo(map, marker, info) {
   if (!info) return;
   marker.addListener("click", () => {
     if (!infoWindow) infoWindow = new google.maps.InfoWindow();
-    infoWindow.setContent(info);
+    infoWindow.setContent(typeof marker.__info === "function" ? marker.__info() : marker.__info);
     infoWindow.open({ anchor: marker, map });
   });
 }
@@ -254,10 +323,12 @@ async function drawTripMap(v, element) {
   v.path.forEach(seg => drawLine(map, seg.points, seg.kind === "on_trip" ? stateColors.on_trip : stateColors.en_route, { dashed: seg.kind === "to_pickup" }));
   if (v.planned_route) drawLine(map, v.planned_route, stateColors.en_route, { dashed: true });
   const t = v.trip;
-  addMarker(map, v.car_at_assignment, "C", "Car at assignment", infoHTML(t, "Car assigned", t.assigned_at));
-  addMarker(map, v.car_at_cancellation, "X", "Car at cancellation", infoHTML(t, "Canceled", t.canceled_at));
-  addMarker(map, v.origin, "P", "Pickup", infoHTML(t, "Pickup", t.pickup_at || t.driver_arrived_at));
-  addMarker(map, v.destination, "D", "Dropoff", infoHTML(t, "Dropoff", t.dropoff_at));
+  const firstLeg = v.path.find(seg => seg.points.length >= 2);
+  const assignedHeading = firstLeg ? heading(firstLeg.points[0], firstLeg.points[1]) || 0 : 0;
+  addIcon(map, v.car_at_assignment, "car", { color: stateColors.en_route, rotation: assignedHeading, title: "Car at assignment", info: infoHTML(t, "Car assigned", t.assigned_at) });
+  addIcon(map, v.car_at_cancellation, "car", { color: stateColors.idle, title: "Car at cancellation", info: infoHTML(t, "Canceled", t.canceled_at) });
+  addIcon(map, v.origin, "origin", { title: "Pickup", info: infoHTML(t, "Pickup", t.pickup_at || t.driver_arrived_at) });
+  addIcon(map, v.destination, "destination", { title: "Dropoff", info: infoHTML(t, "Dropoff", t.dropoff_at) });
   fit(map);
   return map;
 }
@@ -301,15 +372,22 @@ async function supplyView(id, query) {
   const tripsByID = Object.fromEntries(v.trips.map(t => [t.request_id, t.trip]));
   v.events.forEach((e, i) => {
     if (e.row.action !== "pickup" && e.row.action !== "dropoff") return;
-    const marker = addMarker(map, { lat: Number(e.row.lat), lng: Number(e.row.lng) }, e.row.action === "pickup" ? "P" : "D", e.row.request_id,
-      infoHTML(tripsByID[e.row.request_id], e.row.action === "pickup" ? "Pickup" : "Dropoff", e.row.at));
+    const marker = addIcon(map, { lat: Number(e.row.lat), lng: Number(e.row.lng) }, e.row.action === "pickup" ? "origin" : "destination",
+      { title: e.row.request_id, info: infoHTML(tripsByID[e.row.request_id], e.row.action === "pickup" ? "Pickup" : "Dropoff", e.row.at) });
     const row = document.querySelector(`#timeline tr[data-index="${i}"]`);
     if (marker && row) {
       marker.addListener("mouseover", () => row.classList.add("highlight"));
       marker.addListener("mouseout", () => row.classList.remove("highlight"));
     }
   });
-  if (v.position_at) addMarker(map, v.position_at, "🚗", `Car at ${at}`);
+  if (v.position_at) {
+    // state and heading from the segment containing ?at=
+    const span = v.states.find(x => x.start_at <= Number(at) && Number(at) < x.end_at);
+    let rotation = 0;
+    const later = v.events.find(e => Number(e.row.at) > Number(at));
+    if (later) rotation = heading(v.position_at, { lat: Number(later.row.lat), lng: Number(later.row.lng) }) ?? 0;
+    addIcon(map, v.position_at, "car", { color: stateColors[span ? span.state : "idle"], rotation, title: `Car at ${at}` });
+  }
   fit(map);
 }
 
@@ -354,6 +432,125 @@ async function compareTripView(id) {
   }
 }
 
+// ---------- Playback ----------
+let playbackTimer = null;
+async function playbackView(query) {
+  const runKey = query.get("run") === "b" && config.compare_enabled ? "b" : "a";
+  const first = await api(`/api/playback?run=${runKey}`);
+  const start = first.simulation_start_at, end = first.simulation_end_at;
+  let now = Math.min(Math.max(Number(query.get("at")) || start, start), end);
+  let speed = [1, 10, 60, 300].includes(Number(query.get("speed"))) ? Number(query.get("speed")) : 60;
+  let playing = false;
+  app.innerHTML = `<h1>Playback</h1>
+    <div class="playback-controls">
+      <button id="pb-play">Play</button>
+      ${[1, 10, 60, 300].map(s => `<button class="pb-speed" data-speed="${s}">${s}x</button>`).join("")}
+      <input id="pb-slider" type="range" min="${start}" max="${end}" step="1" value="${now}">
+      <span id="pb-time"></span>
+      <form id="pb-jump"><input id="pb-jump-input" placeholder="T+600 or epoch" size="14"><button>Go</button></form>
+      ${config.compare_enabled ? `<label>Run <select id="pb-run"><option value="a">A</option><option value="b">B</option></select></label>` : ""}
+    </div>
+    <div id="pb-counters" class="playback-counters"></div>
+    <div id="playback-map" class="map tall"></div>`;
+  if (config.compare_enabled) { const sel = document.getElementById("pb-run"); sel.value = runKey; sel.onchange = () => navigate(`/playback?run=${sel.value}&at=${Math.round(now)}&speed=${speed}`); }
+  const map = await makeMap(document.getElementById("playback-map"));
+
+  // Windows of timeline data keyed by their start; prefetched ahead of the playhead.
+  const windowSeconds = 900, windows = new Map();
+  const windowStart = t => start + Math.floor((t - start) / windowSeconds) * windowSeconds;
+  function fetchWindow(from) {
+    if (from > end || from < start) return Promise.resolve(null);
+    if (!windows.has(from)) windows.set(from, api(`/api/playback?run=${runKey}&from=${from}&to=${Math.min(from + windowSeconds, end)}`));
+    return windows.get(from);
+  }
+  for (const key of windows.keys()) if (Math.abs(key - windowStart(now)) > 2 * windowSeconds) windows.delete(key);
+
+  const cars = new Map(), requestMarkers = new Map(), headings = new Map();
+  let fitted = false;
+  async function render() {
+    const t = Math.round(now);
+    const data = await fetchWindow(windowStart(now));
+    fetchWindow(windowStart(now) + windowSeconds); // prefetch
+    for (const key of [...windows.keys()]) if (key < windowStart(now) - windowSeconds) windows.delete(key);
+    if (!data) return;
+    const byState = {}, liveCars = new Set(), liveRequests = new Set();
+    let open = 0, active = 0;
+    for (const car of data.cars) {
+      // At a boundary prefer the segment starting now (e.g. a pickup at T+0), so
+      // the car's state matches the request icons; the last segment holds at its end.
+      const seg = car.segments.find(s => s.start_at <= now && now < s.end_at) || car.segments.find(s => s.start_at <= now && now <= s.end_at);
+      if (!seg) continue;
+      const f = seg.end_at > seg.start_at ? (now - seg.start_at) / (seg.end_at - seg.start_at) : 0;
+      const p = { lat: seg.from.lat + (seg.to.lat - seg.from.lat) * f, lng: seg.from.lng + (seg.to.lng - seg.from.lng) * f };
+      const h = heading(seg.from, seg.to);
+      if (h !== null) headings.set(car.supply_id, h);
+      const rotation = headings.get(car.supply_id) || 0, color = carColor(seg.state, seg.riders_aboard);
+      byState[seg.state] = (byState[seg.state] || 0) + 1;
+      liveCars.add(car.supply_id);
+      const info = () => `<div class="info"><strong>${supplyLink(car.supply_id)}</strong><br>${escapeHTML(label(seg.state))}, riders aboard ${seg.riders_aboard}<br>
+        <a href="/supply/${encodeURIComponent(car.supply_id)}?at=${Math.round(now)}">Supply view at ${offset(Math.round(now))}</a></div>`;
+      if (!map) continue;
+      const existing = cars.get(car.supply_id);
+      if (existing) { moveIcon(existing, p, color, rotation); existing.__info = info; }
+      else cars.set(car.supply_id, addIcon(map, p, "car", { color, rotation, title: car.supply_id, info, extend: !fitted }));
+    }
+    for (const r of data.requests) {
+      const until = r.pickup_at ?? r.canceled_at ?? end;
+      let kind = null;
+      if (r.requested_at <= now && now < until) { kind = "origin"; open++; }
+      else if (r.pickup_at !== undefined && r.pickup_at <= now && now < (r.dropoff_at ?? end)) { kind = "destination"; active++; }
+      if (!kind) continue;
+      const key = `${r.request_id}:${kind}`;
+      liveRequests.add(key);
+      if (map && !requestMarkers.has(key)) {
+        const info = `<div class="info"><strong>${tripLink(r.request_id)}</strong> (${escapeHTML(r.status)})<br>Requested ${offset(r.requested_at)}
+          ${r.pickup_at !== undefined ? `<br>Pickup ${offset(r.pickup_at)}` : ""}${r.dropoff_at !== undefined ? `<br>Dropoff ${offset(r.dropoff_at)}` : ""}
+          ${r.canceled_at !== undefined ? `<br>Canceled ${offset(r.canceled_at)}` : ""}${r.supply_id ? `<br>Car ${supplyLink(r.supply_id)}` : ""}</div>`;
+        requestMarkers.set(key, addIcon(map, kind === "origin" ? r.origin : r.destination, kind, { title: r.request_id, info, extend: !fitted }));
+      }
+    }
+    for (const [id, m] of cars) if (!liveCars.has(id)) { removeIcon(m); cars.delete(id); }
+    for (const [key, m] of requestMarkers) if (!liveRequests.has(key)) { removeIcon(m); requestMarkers.delete(key); }
+    if (map && !fitted) { fit(map); fitted = true; }
+    document.getElementById("pb-time").innerHTML = offset(t);
+    document.getElementById("pb-slider").value = t;
+    document.getElementById("pb-counters").innerHTML = `Open requests: ${open} · Active trips: ${active} · ` +
+      Object.entries(byState).map(([s, n]) => `<span class="swatch" style="background:${stateColors[s]}"></span>${escapeHTML(label(s))}: ${n}`).join(" · ");
+  }
+  function syncURL() { history.replaceState(null, "", `/playback?${runKey === "b" ? "run=b&" : ""}at=${Math.round(now)}&speed=${speed}`); }
+  function setPlaying(on) {
+    playing = on;
+    document.getElementById("pb-play").textContent = on ? "Pause" : "Play";
+    if (playbackTimer) cancelAnimationFrame(playbackTimer);
+    playbackTimer = null;
+    if (!on) { syncURL(); return; }
+    let last = performance.now();
+    const tick = async ts => {
+      if (!document.getElementById("playback-map")) return; // navigated away
+      now = Math.min(end, now + (ts - last) / 1000 * speed); last = ts;
+      await render();
+      if (now >= end) { setPlaying(false); return; }
+      if (playing) playbackTimer = requestAnimationFrame(tick);
+    };
+    playbackTimer = requestAnimationFrame(tick);
+  }
+  function highlightSpeed() { document.querySelectorAll(".pb-speed").forEach(b => b.classList.toggle("active", Number(b.dataset.speed) === speed)); }
+  document.getElementById("pb-play").onclick = () => { if (now >= end) now = start; setPlaying(!playing); };
+  document.querySelectorAll(".pb-speed").forEach(b => b.onclick = () => { speed = Number(b.dataset.speed); highlightSpeed(); if (!playing) syncURL(); });
+  document.getElementById("pb-slider").oninput = e => { now = Number(e.target.value); render(); if (!playing) syncURL(); };
+  document.getElementById("pb-jump").onsubmit = e => {
+    e.preventDefault();
+    const text = document.getElementById("pb-jump-input").value.trim();
+    const m = text.match(/^T?\+?(-?\d+)$/i);
+    if (!m) return;
+    const v = Number(m[1]);
+    now = Math.min(Math.max(/^T/i.test(text) || v < start ? start + v : v, start), end);
+    render(); if (!playing) syncURL();
+  };
+  highlightSpeed();
+  await render();
+}
+
 async function decisionsView() {
   app.innerHTML = `<h1>Matching decisions</h1><p>TBD. This view is reserved for a later spec (docs/tooling_spec.md section 5).</p>`;
 }
@@ -362,6 +559,7 @@ async function decisionsView() {
 async function route() {
   const url = new URL(location.href);
   const parts = url.pathname.split("/").filter(Boolean).map(decodeURIComponent);
+  if (playbackTimer) { cancelAnimationFrame(playbackTimer); playbackTimer = null; }
   app.innerHTML = "Loading…";
   try {
     if (parts.length === 0) await dashboardView();
@@ -372,6 +570,7 @@ async function route() {
     else if (parts[0] === "compare" && parts.length === 1) await compareView();
     else if (parts[0] === "compare" && parts[1] === "trips") await compareTripView(parts[2]);
     else if (parts[0] === "decisions") await decisionsView();
+    else if (parts[0] === "playback") await playbackView(url.searchParams);
     else app.innerHTML = "<h1>Not found</h1>";
   } catch (error) {
     app.innerHTML = `<div class="banner bad">${escapeHTML(error.message)}</div>`;

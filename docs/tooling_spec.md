@@ -13,6 +13,8 @@ A local web app for exploring simulation outputs, served by the `rhs` binary. It
 - [3. Supply view](#3-supply-view)
 - [4. Run comparison](#4-run-comparison)
 - [5. Matching decisions](#5-matching-decisions)
+- [6. Playback](#6-playback)
+- [Map icons](#map-icons)
 - [Decisions](#decisions)
 
 ## Goal and non-goals
@@ -67,8 +69,10 @@ Every view has a stable URL, so a link can be pasted into a PR comment.
 | `/compare` | Run comparison (only with `-compare`) |
 | `/compare/trips/{request_id}` | One trip in both runs, side by side |
 | `/decisions` | Reserved for [matching decisions](#5-matching-decisions) |
+| `/playback` | [Playback](#6-playback) of the whole fleet |
+| `/playback?at={epoch}&speed={n}` | Playback paused at a time, with a speed preselected |
 
-A top bar links to the dashboard, Trips, Supply and Compare. A `request_id` or `supply_id` shown anywhere is a link to its view.
+A top bar links to the dashboard, Trips, Supply, Playback and Compare. A `request_id` or `supply_id` shown anywhere is a link to its view.
 
 ## 1. Aggregate results dashboard
 
@@ -166,7 +170,7 @@ All over completed trips. Dwell time is left out of every ratio, so `dropoff_dwe
 - **Map:**
   - The car's path from `assigned_at` to `dropoff_at`: the `driven_polyline` cells of `supply_id`'s SupplyEvents rows in that window.
   - The path to the pickup is drawn dashed and the path with the rider aboard solid.
-  - Markers for the car's location at `assigned_at`, the origin (pickup) and the destination (dropoff).
+  - Markers for the car's location at `assigned_at` (car icon), the origin (pickup, origin icon) and the destination (dropoff, destination icon). See [map icons](#map-icons).
   - A thin grey straight line for the direct origin-to-destination route.
   - For a canceled trip, the planned pickup route from the last `plan_updated` row before `canceled_at` and the point where the car was at cancellation.
 - **Metrics:**
@@ -193,13 +197,13 @@ All over completed trips. Dwell time is left out of every ratio, so `dropoff_dwe
   | `on_trip` | green, darker for 2+ riders aboard |
   | `going_offline` | orange |
 
-  Markers show each pickup and dropoff, labeled with the `request_id`. Hovering a stop highlights its timeline row.
+  Markers show each pickup (origin icon) and dropoff (destination icon), titled with the `request_id`. See [map icons](#map-icons). Hovering a stop highlights its timeline row.
 - **Stats:** the SupplySummary row, plus `online_seconds`, `max_riders_aboard` and `plan_rejected_count` for this car.
 - **Timeline:**
   - Every SupplyEvents row in order: `T+` time, `action`, `state_after`, `request_id` (linked), `seats_in_use` and `odometer_meters`.
   - `plan_updated` rows expand to show the plan's stops with `eta_at`, and draw `planned_polyline` dashed on the map.
   - A state band above the timeline shows time in each state.
-  - `?at=` scrolls to that time and puts the car marker at its interpolated position, using the interpolation rule in spec.md.
+  - `?at=` scrolls to that time and puts the car icon at its interpolated position, using the interpolation rule in spec.md, colored by its state then and rotated to its heading.
 - **Trips:** a list of every request assigned to this car at any time, linked, with status and `ridepool_type`. Requests the car lost to reassignment are marked `reassigned away`.
 
 ## 4. Run comparison
@@ -224,6 +228,51 @@ All over completed trips. Dwell time is left out of every ratio, so `dropoff_dwe
 
 TBD. This section will be specified in a later commit. `/decisions` is reserved for it.
 
+## 6. Playback
+
+`/playback`: a map that animates the whole fleet and every open request over simulated time.
+
+- **Controls:**
+  - Play and pause.
+  - Speed multipliers `1x`, `10x`, `60x` and `300x` simulated seconds per wall-clock second. Default `60x`.
+  - A time slider over `[simulation_start_at, simulation_end_at]` for scrubbing, labeled with `T+` offsets.
+  - A jump-to-time box that takes a `T+` offset or an epoch value.
+  - The URL keeps `?at=` and `?speed=` in sync when paused, so a moment can be shared.
+- **Cars:**
+  - Each car is drawn at its position at the current time, interpolated linearly in lat/lng between consecutive SupplyEvents rows of that car. Between two rows a car drives one straight constant-speed piece or stands still, so this is the same as the supply view's `?at=` and the interpolation rule in [spec.md](spec.md).
+  - Before its first row and after it goes `offline`, a car isn't drawn.
+  - The car icon is colored by the state it's driving in (the previous row's `state_after`), using the supply view's state colors: `idle` grey, `en_route` blue, `on_trip` green (darker for 2+ riders aboard) and `going_offline` orange. It's rotated to its heading on the current segment, and keeps its last heading while standing still.
+- **Requests:**
+  - An open request is shown with the origin icon at its origin from `requested_at` until `pickup_at`, or until `canceled_at` or the run end if it was never picked up.
+  - An active trip, picked up but not yet dropped off, shows the destination icon at its destination from `pickup_at` until `dropoff_at`.
+- **Info windows:** clicking a car shows its `supply_id`, state and riders aboard, with links to `/supply/{supply_id}?at={now}`. Clicking a request icon shows the request's status and times, with links to `/trips/{request_id}`.
+- **Counters:** the header shows the current `T+` time, open requests, active trips and cars by state.
+- **Compare:** with `-compare`, a run selector (A or B) switches which run is played. Side-by-side synchronized playback of A and B is future work.
+- **Without a maps key:** the page still has the controls and counters, and the map is replaced by the usual notice.
+
+### Playback API
+
+`GET /api/playback?from={epoch}&to={epoch}[&run=b]` returns the timeline for one window of simulated time. The browser fetches windows ahead of the playhead, so it never loads the whole run.
+
+- `from` defaults to `simulation_start_at`. `to` defaults to `from + 900` and is capped at `from + 3600` and at `simulation_end_at`. A `to` before `from` is a 400.
+- `cars`: one entry per car with any segment overlapping the window, sorted by `supply_id`. Each has `supply_id`, `link` and `segments`. A segment covers the time between two consecutive SupplyEvents rows of that car: `start_at`, `end_at`, `from` and `to` locations, `state` (the earlier row's `state_after`) and `riders_aboard`. After a car's last row, unless it's `offline`, a standing segment runs to `simulation_end_at`. Zero-length segments are dropped.
+- `requests`: one entry per request whose visible span overlaps the window, sorted by `requested_at` then `request_id`. Each has `request_id`, `link`, `status`, `supply_id`, `origin`, `destination`, `requested_at`, and `pickup_at`, `dropoff_at` and `canceled_at` when set. The origin and destination come from the car plans that list the request; a request no plan listed has no locations and isn't returned.
+- The response also echoes `from`, `to`, `simulation_start_at` and `simulation_end_at`.
+
+## Map icons
+
+Every map uses the same three small inline SVG icons, drawn for this project and embedded in the binary:
+
+| Icon | Meaning | Used on |
+|---|---|---|
+| Person with a hand raised | A request origin (pickup) | Trip view, supply view, playback |
+| Checkered flag | A request destination (dropoff) | Trip view, supply view, playback |
+| Top-down car, rotated to its heading and colored by state | A car | Trip view (car at assignment and at cancellation), supply view (`?at=`), playback |
+
+With a Map ID they're advanced-marker content; without one they're classic marker icons. Icons are anchored at the point they mark: the person's feet, the flag pole's base and the car's center.
+
+Google's own POI and transit icons are hidden (`clickableIcons: false`, and on raster maps a style that turns off `poi` and `transit` label icons) so they can't be mistaken for request icons; with a Map ID, hide them in the map style. In playback, when a car has a row exactly at the playhead, the segment starting there wins, so a pickup at T+0 shows the car as on trip next to its flag.
+
 ## Decisions
 
 1. **Pairing:** the input hashes cover the parsed records, not the raw files. Settings count toward pairing: a different `settings_sha256` is shown as a settings diff but doesn't block the comparison.
@@ -234,3 +283,7 @@ TBD. This section will be specified in a later commit. `/decisions` is reserved 
 6. **Scale:** the Go server aggregates and paginates; the browser gets only what a page shows.
 7. **Maps:** an API key is required for maps, and an optional Map ID enables vector maps and advanced markers.
 8. **Comparison:** two runs now; several runs against one baseline later.
+9. **Playback interpolation:** linear in lat/lng between consecutive SupplyEvents rows, the same rule as the supply view and the simulator. Car state during a segment is the earlier row's `state_after`.
+10. **Playback windows:** the server returns windows of at most 3600 simulated seconds (900 by default) through `/api/playback`, and the browser prefetches the next window, so playback scales with the window and not the run.
+11. **Playback compare:** one run at a time with an A/B selector. Side-by-side synchronized playback is future work.
+12. **Icons:** original inline SVGs (person with a hand raised, checkered flag, top-down car) with no external assets or licenses, used on every map.
