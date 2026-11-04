@@ -22,8 +22,9 @@ type file struct {
 		AverageSpeedMetersPerSecond   *float64 `toml:"average_speed_meters_per_second"`
 	} `toml:"simulation"`
 	Hooks struct {
-		Matching string `toml:"matching"`
-		Routing  string `toml:"routing"`
+		Matching       string `toml:"matching"`
+		DriverBehavior string `toml:"driver_behavior"`
+		Routing        string `toml:"routing"`
 	} `toml:"hooks"`
 	IO struct {
 		Reader          string `toml:"reader"`
@@ -62,6 +63,9 @@ func (r Reader) ReadSettings() (model.Settings, error) {
 			Reader: orDefault(f.IO.Reader, "csv"), Writer: orDefault(f.IO.Writer, "csv"),
 			RequestsPath: f.IO.RequestsPath, SupplyPath: f.IO.SupplyPath, OutputDirectory: f.IO.OutputDirectory,
 		},
+	}
+	if plugin := f.Hooks.DriverBehavior; plugin != "" && plugin != "simple" {
+		out.DriverBehaviorHook = plugin // the default stays empty, see model.Settings
 	}
 	if s.PoolingEnabled != nil {
 		out.PoolingEnabled = *s.PoolingEnabled

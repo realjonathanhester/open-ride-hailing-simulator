@@ -11,17 +11,19 @@ A deterministic discrete-event simulator that replays rider requests against a f
 - [Lifecycles](#lifecycles)
 - [Routing hook](#routing-hook)
 - [Matching hook](#matching-hook)
+- [Driver behavior](#driver-behavior)
 - [Simulation loop](#simulation-loop)
 - [Outputs](#outputs)
 - [Worked example](#worked-example)
 - [Testing](#testing)
+- [Decisions](#decisions)
 
 ## Goal and scope
 
 Replay a time-ordered sequence of rideshare requests against a fleet of supply (cars). Use the result to evaluate matching strategies on rider wait, trip efficiency and fleet utilization. Matching and routing are plug-ins; the simulator owns time, state, location interpolation and logging.
 
 - In scope: the event clock, request and supply lifecycles, rider cancellations, plan execution, interpolating positions, output logs and summary metrics.
-- Out of scope (v1): pricing, drivers declining, traffic that changes during a route, and rider walking. Idle repositioning is possible only through plans the matcher sends.
+- Out of scope (v1): pricing, traffic that changes during a route, and rider walking. Idle repositioning comes from plans the matcher sends or from the [driver behavior](#driver-behavior) plugin. No built-in plugin declines offers yet.
 
 ## Conventions
 
@@ -54,7 +56,7 @@ Replay a time-ordered sequence of rideshare requests against a fleet of supply (
 | `default_num_available_seats` | int | 4 | Used when a supply leaves it out |
 | `average_speed_meters_per_second` | float | router-specific | Used only by the built-in straight-line router |
 
-The settings file is TOML. It also names the matching hook, the routing hook, and the reader and writer plugins along with their options, such as file paths or a database connection.
+The settings file is TOML. It also names the matching hook, the driver behavior plugin (`[hooks] driver_behavior`, default `simple`), the routing hook, and the reader and writer plugins along with their options, such as file paths or a database connection.
 
 ### Demand (ride requests)
 
@@ -130,7 +132,7 @@ stateDiagram-v2
 
 A cancellation records which limit fired in `cancel_reason` (`max_request_to_assignment` or `max_request_to_pickup`). The assignment limit is checked against `requested_at` plus `max_request_to_assignment_seconds`: at any time from that deadline on, if the request is waiting with no car assigned (never assigned, or unassigned again), the rider cancels. Requests already picked up are never affected. A rider whose car is already at the origin can still cancel during the pickup dwell. If a request is canceled, the simulator removes its stops from the car's plan and reroutes the car.
 
-Supply states are `offline`, `idle` (online with no plan), `en_route` (next stop is a pickup and no rider is aboard), `on_trip` (at least one rider aboard), and `going_offline` (past offline_at but still finishing its plan).
+Supply states are `offline`, `idle` (online with no plan, standing still), `repositioning` (online with no plan, driving to a target its [driver behavior](#driver-behavior) chose), `en_route` (next stop is a pickup and no rider is aboard), `on_trip` (at least one rider aboard), and `going_offline` (past offline_at but still finishing its plan).
 
 ## Routing hook
 
@@ -167,6 +169,43 @@ The matcher sends only the ordered stops. The simulator starts the plan from the
 - With reassignment off, an assigned request can't be moved to another car or dropped from its plan.
 - A request is in at most one plan.
 - An invalid change is rejected as a whole and logged as `plan_rejected`; the supply keeps its previous plan.
+
+## Driver behavior
+
+A driver behavior plugin decides what drivers do on their own, outside the matcher's plans. It's chosen in settings and registered by name like the matcher, router, readers and writers:
+
+```toml
+[hooks]
+driver_behavior = "return_to_origin"   # default "simple"
+```
+
+### Interface
+
+Every hook gets a `DriverState`: `{now, supply_id, state, location, online_location, online_at, offline_at, num_available_seats, seats_in_use, plan}`, where `location` is the car's interpolated position now and `plan` is its current plan with ETAs, as in the matcher's supply view.
+
+| Hook | Called | Returns |
+|---|---|---|
+| `on_assignment_offered(car, plan)` | Before a valid matcher plan change that adds at least one pickup the car doesn't already have is applied | `accept: bool`. Declining rejects the whole change: the car keeps its previous plan and logs `plan_declined`. Requests the change would have moved stay where they were, or become `requested` if their old car's plan dropped them |
+| `on_idle(car)` | Whenever the car's plan becomes empty while it's online and not `going_offline`: after a dropoff, after a cancellation or unassignment empties it, and on `reposition_arrived` | An optional reposition target. Nothing, or the car's current location, means stand still |
+
+Plugins must be deterministic: the same inputs give the same answers, with no wall clock and no unseeded randomness. Future behaviors (declining offers, choosing when to go online or offline, choosing reposition targets from demand) extend this interface with new hooks that default to today's behavior.
+
+### Built-in plugins
+
+| Name | Behavior |
+|---|---|
+| `simple` (default) | Accepts every assignment, goes online and offline once as its supply row says, and stands still when it has no plan. This is the simulator's behavior before plugins existed, and its outputs are byte-identical |
+| `return_to_origin` | Like `simple`, but whenever `on_idle` is called away from its supply `online_lat`/`online_lng`, it drives back there |
+
+### Repositioning
+
+- **Start.** When `on_idle` returns a target different from the car's location, the simulator routes there from the current location and logs `reposition_started` (`state_after = repositioning`, `planned_polyline` set, `plan` empty). It comes right after the `idle` row at the same second.
+- **Movement.** The car moves along the route and is interpolated like any driving car.
+- **Arrival.** At the end of the route it logs `reposition_arrived` (`state_after = idle`) and `on_idle` is called again. A reposition arrival sorts with dropoffs in the tie-break.
+- **Assignable.** A repositioning car is open to the matcher on every call, including batch ticks. The matcher sees `state = repositioning`, its interpolated location and an empty plan, so its ETAs are measured from where the car is now. Any accepted plan change ends the reposition at that point and routes from there. The `plan_updated` row's `driven_polyline` shows how far it got. Pooling, reassignment and batching rules don't change, because a repositioning car never has stops.
+- **Going offline.** If `offline_at` arrives while the car is repositioning, its plan is empty, so it goes `offline` immediately at its interpolated position, as an idle car would. A `going_offline` car never repositions.
+- **Accounting.** Repositioning time and distance count as idle (`idle_seconds`, `idle_meters`) and as deadhead. Reposition arrivals are internal events, so they never call the matcher, and they keep the run going. `simulation_end_at` includes a final return trip.
+- **Router errors.** If the router can't route the reposition, the car logs `reposition_rejected` and stays idle.
 
 ## Simulation loop
 
@@ -216,7 +255,7 @@ The matcher sends only the ordered stops. The simulator starts the plan from the
 |---|---|
 | `supply_id` | The car |
 | `at` | When the action happened |
-| `action` | One of `online`, `plan_updated`, `plan_rejected`, `arrived_pickup`, `pickup`, `arrived_dropoff`, `dropoff`, `stop_removed` (the rider canceled), `idle`, `offline` |
+| `action` | One of `online`, `plan_updated`, `plan_rejected`, `plan_declined` (the driver behavior declined it), `arrived_pickup`, `pickup`, `arrived_dropoff`, `dropoff`, `stop_removed` (the rider canceled), `idle`, `reposition_started`, `reposition_arrived`, `reposition_rejected`, `offline` |
 | `lat` | Car latitude at the action |
 | `lng` | Car longitude at the action |
 | `state_after` | Car state after the action |
@@ -225,7 +264,7 @@ The matcher sends only the ordered stops. The simulator starts the plan from the
 | `seats_in_use` | Seats in use after the action |
 | `odometer_meters` | Total distance driven so far |
 | `driven_polyline` | The path actually driven since this car's previous row |
-| `planned_polyline` | On `plan_updated` rows: the full new route from the router |
+| `planned_polyline` | On `plan_updated` and `reposition_started` rows: the full new route from the router |
 | `plan` | On `plan_updated` rows: the new plan's stops with their ETAs |
 
 ### 3. Supply summary (one row per supply)
@@ -235,10 +274,10 @@ The matcher sends only the ordered stops. The simulator starts the plan from the
 | `supply_id` | The car |
 | `online_at` | When it came online |
 | `offline_at` | When it went offline, or empty if it never did |
-| `idle_seconds` | Time spent idle |
+| `idle_seconds` | Time spent idle, including repositioning |
 | `en_route_seconds` | Time spent driving to pickups with no rider aboard |
 | `on_trip_seconds` | Time with at least one rider aboard |
-| `idle_meters` | Distance driven while idle (repositioning) |
+| `idle_meters` | Distance driven while idle (repositioning, whether from the driver behavior or a matcher plan) |
 | `en_route_meters` | Distance driven to pickups with no rider aboard |
 | `on_trip_meters` | Distance driven with at least one rider aboard |
 | `requests_served` | Requests completed |
@@ -260,7 +299,7 @@ Identifies the run so two runs can be compared as a pair.
 | `requests_sha256` | SHA-256 of the parsed ride requests: records sorted by `request_id` with defaults filled in, as canonical JSON. Reformatting the CSV doesn't change it |
 | `supply_sha256` | SHA-256 of the parsed supply, built the same way and sorted by `supply_id` |
 | `settings_sha256` | SHA-256 of `settings` |
-| `settings` | The settings the run actually used, defaults filled in, as JSON. Reader and writer paths are left out so moving files doesn't change the hash |
+| `settings` | The settings the run actually used, defaults filled in, as JSON. Reader and writer paths are left out so moving files doesn't change the hash. `driver_behavior_hook` is included only when it isn't the default `simple` |
 | `simulation_start_at` | Simulated clock start: the first `requested_at` |
 | `simulation_end_at` | Simulated time of the last processed event (batch ticks excluded) |
 
@@ -295,3 +334,12 @@ _Pooling on_
 - **Hooks.** Tests use the built-in straight-line router and a deterministic reference matcher defined for tests.
 - **Benchmarks.** Benchmark scenarios built from public data are specified in [benchmark_spec.md](benchmark_spec.md).
 - **Naming and cases.** Fixture layout, naming conventions, landmark coordinates, the reference matcher and the test cases are in [test_specs.md](test_specs.md).
+
+## Decisions
+
+1. **Driver behavior is a plugin.** It's chosen by name in `[hooks] driver_behavior`, alongside `matching` and `routing`, and registered like the matcher and router. `simple` is the default and reproduces the earlier behavior byte for byte.
+2. **Default settings hash.** `driver_behavior_hook` is left out of the `settings` JSON when it's `simple`, so runs from before the plugin existed keep their `settings_sha256` and stay comparable. Naming `simple` explicitly gives the same hash.
+3. **Repositioning state.** Repositioning is a separate supply state, `repositioning`, so logs and the viewer can tell it from standing still. For time and distance accounting it counts as idle, so the supply summary columns and utilization formulas don't change.
+4. **Assignable while repositioning.** A repositioning car can be matched from its interpolated position. An assignment ends the reposition where the car is, with no extra log row; the `plan_updated` row marks it.
+5. **Offline wins.** `offline_at` during a reposition takes the car offline right where it is. Cars never reposition while `going_offline`.
+6. **Minimal hooks.** The interface has two hooks, `on_assignment_offered` and `on_idle`. Declining is supported by the interface but not by any built-in plugin yet. Online and offline decisions are future hooks.

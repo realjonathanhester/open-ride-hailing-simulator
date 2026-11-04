@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/realjonathanhester/ride-hailing-simulator/driverbehavior"
 	"github.com/realjonathanhester/ride-hailing-simulator/matching"
 	"github.com/realjonathanhester/ride-hailing-simulator/model"
 	"github.com/realjonathanhester/ride-hailing-simulator/plugins/csvio"
@@ -37,6 +38,17 @@ func NewMatcher(name string) (model.Matcher, error) {
 		return matching.NewGreedy(), nil
 	}
 	return nil, fmt.Errorf("unknown matching hook %q", name)
+}
+
+// NewDriverBehavior returns a driver behavior plugin by name; empty is simple.
+func NewDriverBehavior(name string) (model.DriverBehavior, error) {
+	switch name {
+	case "", driverbehavior.SimpleName:
+		return driverbehavior.Simple{}, nil
+	case driverbehavior.ReturnToOriginName:
+		return driverbehavior.ReturnToOrigin{}, nil
+	}
+	return nil, fmt.Errorf("unknown driver behavior plugin %q", name)
 }
 
 // NewRouter returns a routing hook by name.
@@ -80,7 +92,13 @@ func RunFiles(settingsPath string, paths Paths) (*simulator.Result, error) {
 	if err != nil {
 		return nil, err
 	}
-	result, err := simulator.New(settings, router, matcher).Run(requests, supplies)
+	behavior, err := NewDriverBehavior(settings.DriverBehaviorHook)
+	if err != nil {
+		return nil, err
+	}
+	sim := simulator.New(settings, router, matcher)
+	sim.SetDriverBehavior(behavior)
+	result, err := sim.Run(requests, supplies)
 	if err != nil {
 		return nil, err
 	}

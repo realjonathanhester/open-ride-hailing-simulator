@@ -93,7 +93,7 @@ Let `online_seconds = (offline_at or run end) - online_at` for each row of Suppl
 | `deadhead_distance_share` | `en_route_distance_share + idle_distance_share` |
 | `utilization` distribution | Histogram of per-car `utilization` |
 
-The time shares add up to 1. Time spent `going_offline` counts in whichever of the three it was doing. A stacked bar shows the three time shares and the three distance shares.
+The time shares add up to 1. Time spent `going_offline` counts in whichever of the three it was doing, and time spent `repositioning` counts as idle, following the simulator's supply summary. A stacked bar shows the three time shares and the three distance shares.
 
 ### Rider wait
 
@@ -196,6 +196,7 @@ All over completed trips. Dwell time is left out of every ratio, so `dropoff_dwe
   | `en_route` | blue |
   | `on_trip` | green, darker for 2+ riders aboard |
   | `going_offline` | orange |
+  | `repositioning` | purple, labeled **Repositioning** |
 
   Markers show each pickup (origin icon) and dropoff (destination icon), titled with the `request_id`. See [map icons](#map-icons). Hovering a stop highlights its timeline row.
 - **Stats:** the SupplySummary row, plus `online_seconds`, `max_riders_aboard` and `plan_rejected_count` for this car.
@@ -241,7 +242,7 @@ TBD. This section will be specified in a later commit. `/decisions` is reserved 
 - **Cars:**
   - Each car is drawn at its position at the current time, interpolated linearly in lat/lng between consecutive SupplyEvents rows of that car. Between two rows a car drives one straight constant-speed piece or stands still, so this is the same as the supply view's `?at=` and the interpolation rule in [spec.md](spec.md).
   - Before its first row and after it goes `offline`, a car isn't drawn.
-  - The car icon is colored by the state it's driving in (the previous row's `state_after`), using the supply view's state colors: `idle` grey, `en_route` blue, `on_trip` green (darker for 2+ riders aboard) and `going_offline` orange. It's rotated to its heading on the current segment, and keeps its last heading while standing still.
+  - The car icon is colored by the state it's driving in (the previous row's `state_after`), using the supply view's state colors: `idle` grey, `repositioning` purple, `en_route` blue, `on_trip` green (darker for 2+ riders aboard) and `going_offline` orange. It's rotated to its heading on the current segment, and keeps its last heading while standing still.
 - **Requests:**
   - An open request is shown with the origin icon at its origin from `requested_at` until `pickup_at`, or until `canceled_at` or the run end if it was never picked up.
   - An active trip, picked up but not yet dropped off, shows the destination icon at its destination from `pickup_at` until `dropoff_at`.
@@ -287,3 +288,4 @@ Google's own POI and transit icons are hidden (`clickableIcons: false`, and on r
 10. **Playback windows:** the server returns windows of at most 3600 simulated seconds (900 by default) through `/api/playback`, and the browser prefetches the next window, so playback scales with the window and not the run.
 11. **Playback compare:** one run at a time with an A/B selector. Side-by-side synchronized playback is future work.
 12. **Icons:** original inline SVGs (person with a hand raised, checkered flag, top-down car) with no external assets or licenses, used on every map.
+13. **Repositioning:** the viewer shows it as its own state (purple, "Repositioning") on the supply view, the state band, playback cars and counters. The dashboard counts it as idle, the same as the supply summary does.
