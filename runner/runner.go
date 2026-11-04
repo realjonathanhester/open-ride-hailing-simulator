@@ -132,6 +132,10 @@ func RunFiles(settingsPath string, paths Paths) (*simulator.Result, error) {
 	if err != nil {
 		return nil, err
 	}
+	if counter, ok := router.(interface{ RequestCounts() (int64, int64) }); ok {
+		table, route := counter.RequestCounts()
+		fmt.Fprintf(os.Stderr, "osrm: %d table requests, %d route requests\n", table, route)
+	}
 	if err := os.MkdirAll(settings.IO.OutputDirectory, 0o755); err != nil {
 		return nil, err
 	}

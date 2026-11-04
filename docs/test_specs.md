@@ -68,6 +68,7 @@ The first five are used by the current fixtures; the rest are reserved for futur
    - **Pooling on:** try every valid insertion of the pickup and dropoff into the remaining plan, keeping existing stop order and seat limits, and keep the one with the lowest total plan duration. Ties go to the earliest positions.
 3. Choose the car with the earliest pickup ETA. Ties go to the lowest `supply_id`. An assigned request moves only if another car is strictly earlier.
 4. Return a plan change for every car whose plan changed; return nothing if no plan changed.
+5. With `[matching] max_candidate_cars = N`, step 2 evaluates only the N open cars and the N busy cars closest to the pickup by haversine distance, ties to the lowest `supply_id`. No fixture sets it, so every case below prices every car.
 
 ## How expected values are derived
 
@@ -219,3 +220,32 @@ Cases 18 to 23 are in `tests/driver_behavior_test.go`. `return_to_origin.toml` i
 
 - **Fixtures:** `return_to_origin.toml`, `one_car_at_kezar_stadium_offline_early.csv`, `single_trip.csv`
 - **Assert:** the last row is `offline` at T+654 at Coit Tower, with no `reposition_started` rows.
+
+### Candidate pruning
+
+Component tests call the `greedy_nearest_eta` matcher directly with a fake router that prices every leg at 100 s, so every car has the same pickup time and only pruning decides. Points are in downtown Austin.
+
+### 24. `pruning_excludes_far_car_even_with_equal_pickup_time`
+
+- **Input:** `max_candidate_cars = 1`, idle `car_a_far` 3.6 km from the pickup and idle `car_b_near` 90 m away
+- **Assert:** `car_b_near` is assigned, and the far car is neither routed from nor prefetched
+
+### 25. `without_pruning_equal_pickup_times_go_to_lowest_supply_id`
+
+- **Input:** case 24 with `max_candidate_cars = 0`
+- **Assert:** `car_a_far` is assigned on the `supply_id` tie-break, and it was routed from
+
+### 26. `pruning_tie_on_distance_keeps_lowest_supply_id`
+
+- **Input:** `max_candidate_cars = 1`, idle `car_z_north` and `car_y_south` each 310 m from the pickup
+- **Assert:** `car_y_south` is assigned and the north car is never routed from
+
+### 27. `pruning_limits_pooling_candidates_separately`
+
+- **Input:** pooling on, `max_candidate_cars = 1`, busy `car_a_busy_far` and `car_b_busy_near` (one rider each) and idle `car_c_open_far` 310 m away
+- **Assert:** `car_b_busy_near` is assigned with plan pickup, dropoff, its rider's dropoff; the far busy car is never routed from; the open car is still priced as the one kept open car; and the busy car's planned stop is a prefetch destination
+
+### 28. `zero_candidate_limit_is_the_default`
+
+- **Fixtures:** `base_default.toml` and `no_candidate_limit.toml`, each with `ferry_building_car_then_union_square_car_online_late.csv` and `single_trip.csv`
+- **Assert:** both runs produce byte-identical trips, supply event log, supply summary, run summary (excluding timings) and run metadata, including `settings_sha256`

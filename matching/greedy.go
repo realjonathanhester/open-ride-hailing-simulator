@@ -12,6 +12,11 @@
 //  3. The car with the earliest pickup ETA wins, ties to the lowest supply_id.
 //     An assigned request moves only to a strictly earlier car.
 //  4. A plan change is returned for every car whose plan changed.
+//
+// With [matching] max_candidate_cars = N > 0, each request prices only the N
+// open cars (empty plan) and the N busy cars (non-empty plan) closest to its
+// pickup by haversine distance from the car's current position, ties to the
+// lowest supply_id, and prefetches router legs for just those cars.
 package matching
 
 import (
@@ -19,6 +24,7 @@ import (
 	"sort"
 
 	"github.com/realjonathanhester/ride-hailing-simulator/model"
+	"github.com/realjonathanhester/ride-hailing-simulator/routing"
 )
 
 // Greedy is the greedy nearest-ETA matcher.
@@ -72,7 +78,12 @@ func (g *Greedy) Match(in model.MatchInput) []model.PlanChange {
 		ctx.stops[model.Stop{RequestID: r.RequestID, Type: model.Dropoff}] = stopInfo{r.Destination, r.NumRequestedSeats}
 	}
 
-	ctx.prefetch(eligible, work, requests)
+	limit := in.Settings.MaxCandidateCars
+	if limit <= 0 {
+		ctx.prefetch(eligible, work, requests)
+	} else {
+		ctx.prefetchPruned(eligible, work, requests, supplies, limit)
+	}
 	for _, r := range requests {
 		switch r.Status {
 		case model.StatusRequested:
@@ -95,9 +106,13 @@ func (g *Greedy) Match(in model.MatchInput) []model.PlanChange {
 				}
 			}
 		}
+		candidates := eligible
+		if limit > 0 {
+			candidates = nearestCandidates(eligible, work, r, current, limit)
+		}
 		bestSupply, bestEta := "", int64(math.MaxInt64)
 		var bestPlan []model.Stop
-		for _, s := range eligible {
+		for _, s := range candidates {
 			if s.SupplyID == current || s.NumAvailableSeats < r.NumRequestedSeats {
 				continue
 			}
@@ -152,6 +167,99 @@ func (ctx *matchContext) prefetch(eligible []model.SupplyView, work map[string][
 		}
 	}
 	prefetcher.Prefetch(sources, destinations, ctx.in.Now)
+}
+
+// nearestCandidates returns, in supply_id order, the limit open cars (empty
+// working plan) and the limit busy cars (non-empty working plan) closest to
+// the request's pickup by haversine distance from the car's current
+// position, ties to the lowest supply_id. Cars that can't take the request
+// (the current car, too few seats) are left out before ranking.
+func nearestCandidates(eligible []model.SupplyView, work map[string][]model.Stop, r model.RequestView, current string, limit int) []model.SupplyView {
+	type ranked struct {
+		supply   model.SupplyView
+		distance int64
+	}
+	var open, busy []ranked
+	for _, s := range eligible {
+		if s.SupplyID == current || s.NumAvailableSeats < r.NumRequestedSeats {
+			continue
+		}
+		entry := ranked{s, routing.HaversineMeters(s.Location, r.Origin)}
+		if len(work[s.SupplyID]) == 0 {
+			open = append(open, entry)
+		} else {
+			busy = append(busy, entry)
+		}
+	}
+	var out []model.SupplyView
+	for _, set := range [][]ranked{open, busy} {
+		sort.SliceStable(set, func(i, j int) bool {
+			if set[i].distance != set[j].distance {
+				return set[i].distance < set[j].distance
+			}
+			return set[i].supply.SupplyID < set[j].supply.SupplyID
+		})
+		if len(set) > limit {
+			set = set[:limit]
+		}
+		for _, entry := range set {
+			out = append(out, entry.supply)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].SupplyID < out[j].SupplyID })
+	return out
+}
+
+// prefetchPruned hints the router once per call with the legs every open
+// request's pruned candidates can use, ranked against the plans as they
+// stand at the start of the call. Assignments made during the call can change
+// a later request's candidates; those few legs are fetched on demand.
+func (ctx *matchContext) prefetchPruned(eligible []model.SupplyView, work map[string][]model.Stop, requests []model.RequestView, supplies map[string]model.SupplyView, limit int) {
+	prefetcher, ok := ctx.in.Router.(model.LegPrefetcher)
+	if !ok {
+		return
+	}
+	var sources, destinations []model.Location
+	seenSource, seenDestination := map[model.Location]bool{}, map[model.Location]bool{}
+	addSource := func(l model.Location) {
+		if !seenSource[l] {
+			seenSource[l] = true
+			sources = append(sources, l)
+		}
+	}
+	addDestination := func(l model.Location) {
+		if !seenDestination[l] {
+			seenDestination[l] = true
+			destinations = append(destinations, l)
+		}
+	}
+	for _, r := range requests {
+		if r.Status != model.StatusRequested && (r.Status != model.StatusAssigned || !ctx.in.Settings.ReassignmentEnabled) {
+			continue
+		}
+		current := ""
+		if r.Status == model.StatusAssigned {
+			current = r.SupplyID
+		}
+		cars := nearestCandidates(eligible, work, r, current, limit)
+		if s, ok := supplies[current]; ok {
+			cars = append(cars, s)
+		}
+		for _, l := range []model.Location{r.Origin, r.Destination} {
+			addSource(l)
+			addDestination(l)
+		}
+		for _, s := range cars {
+			addSource(s.Location)
+			for _, stop := range work[s.SupplyID] {
+				addSource(ctx.stops[stop].location)
+				addDestination(ctx.stops[stop].location)
+			}
+		}
+	}
+	if len(destinations) > 0 {
+		prefetcher.Prefetch(sources, destinations, ctx.in.Now)
+	}
 }
 
 // bestInsertion returns the candidate plan with the lowest total duration and

@@ -27,6 +27,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/realjonathanhester/ride-hailing-simulator/model"
@@ -84,6 +85,8 @@ type Router struct {
 	geometries map[pair][]model.Location
 	cacheFile  *os.File
 	cacheOut   *bufio.Writer
+	// tableRequests and routeRequests count HTTP requests sent to OSRM.
+	tableRequests, routeRequests atomic.Int64
 }
 
 func round5(v float64) int64 { return int64(math.Round(v * 1e5)) }
@@ -355,7 +358,18 @@ func sortedPoints(set map[point]bool) []point {
 	return out
 }
 
+// RequestCounts returns how many /table and /route requests the router has
+// sent to the OSRM server so far. Cache hits send none.
+func (r *Router) RequestCounts() (table, route int64) {
+	return r.tableRequests.Load(), r.routeRequests.Load()
+}
+
 func (r *Router) get(path string, out any) error {
+	if strings.HasPrefix(path, "/table/") {
+		r.tableRequests.Add(1)
+	} else {
+		r.routeRequests.Add(1)
+	}
 	resp, err := r.opts.Client.Get(r.opts.URL + path)
 	if err != nil {
 		return fmt.Errorf("osrm: %w", err)
