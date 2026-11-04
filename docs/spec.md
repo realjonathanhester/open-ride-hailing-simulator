@@ -87,7 +87,7 @@ The settings file is TOML. It also names the matching hook, the routing hook, an
 |---|---|
 | Settings | TOML file |
 | Ride requests, supply | CSV with a header row |
-| Trips, supply event log, supply summary, run summary | CSV with a header row |
+| Trips, supply event log, supply summary, run summary, run metadata | CSV with a header row |
 
 ### CSV conventions
 
@@ -203,8 +203,10 @@ The matcher sends only the ordered stops. The simulator starts the plan from the
 | `trip_distance_meters` | Distance from pickup to dropoff as driven, including pooling detours |
 | `trip_duration_seconds` | `dropoff_at` minus `pickup_at`, including pooling detours and the dropoff dwell |
 | `direct_distance_meters` | Distance of the direct route from origin to destination |
+| `direct_duration_seconds` | Router duration of the direct route from origin to destination, with no dwells |
 | `detour_ratio` | `trip_distance_meters` divided by `direct_distance_meters` |
 | `pickup_distance_meters` | Distance the car drove to the pickup after the final assignment |
+| `max_co_riders` | Most other riders aboard at once while this rider was aboard; `0` means never shared. Empty if never picked up |
 | `canceled_at` | When the rider canceled, if they did |
 | `cancel_reason` | Which limit fired: `max_request_to_assignment` or `max_request_to_pickup` |
 
@@ -247,6 +249,30 @@ The matcher sends only the ordered stops. The simulator starts the plan from the
 ### 4. Run summary
 
 Totals: requests completed and canceled (split by reason), median and p90 wait, mean detour ratio, fleet utilization, matcher calls by trigger, and time spent in the matcher and router.
+
+### 5. Run metadata (one row)
+
+Identifies the run so two runs can be compared as a pair.
+
+| Field | Meaning |
+|---|---|
+| `simulator_version` | Version of the simulator that produced the outputs |
+| `requests_sha256` | SHA-256 of the parsed ride requests: records sorted by `request_id` with defaults filled in, as canonical JSON. Reformatting the CSV doesn't change it |
+| `supply_sha256` | SHA-256 of the parsed supply, built the same way and sorted by `supply_id` |
+| `settings_sha256` | SHA-256 of `settings` |
+| `settings` | The settings the run actually used, defaults filled in, as JSON. Reader and writer paths are left out so moving files doesn't change the hash |
+| `simulation_start_at` | Simulated clock start: the first `requested_at` |
+| `simulation_end_at` | Simulated time of the last processed event (batch ticks excluded) |
+
+Two runs are **paired** when `requests_sha256` and `supply_sha256` match. A different `settings_sha256` is expected when comparing strategies.
+
+## Command line
+
+```sh
+orhs run -settings settings.toml -supply supply.csv -requests requests.csv -output out/
+```
+
+Flags override the paths in the settings file's `[io]` section. Calling `orhs` with flags and no subcommand still means `run`. The output viewer (`orhs view`) is specified in [tooling_spec.md](tooling_spec.md).
 
 ## Worked example
 

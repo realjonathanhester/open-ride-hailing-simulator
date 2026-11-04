@@ -95,9 +95,10 @@ Cases 1 and 4 are the **exhaustive output tests**: they assert every field of ev
 
 - **Purpose:** Verifies every output field on the simplest trip. The car is already at the origin, so pickup is immediate.
 - **Fixtures:** `base_default.toml`, `one_car_at_kezar_stadium.csv`, `single_trip.csv`
-- **Trip `kezar_stadium_to_coit_tower`:** `status = completed`, `requested_at = T+60`, `num_requested_seats = 1`, `first_assigned_at = assigned_at = T+60`, `supply_id = car_at_kezar_stadium`, `reassign_count = 0`, `ridepool_type = p0d0`, `eta_at_assignment_seconds = 0`, `driver_arrived_at = pickup_at = T+60`, `dropoff_at = T+654`, `wait_seconds = 0`, `trip_distance_meters = 5940`, `trip_duration_seconds = 594`, `direct_distance_meters = 5940`, `detour_ratio = 1.0`, `pickup_distance_meters = 0`, `canceled_at` and `cancel_reason` empty.
+- **Trip `kezar_stadium_to_coit_tower`:** `status = completed`, `requested_at = T+60`, `num_requested_seats = 1`, `first_assigned_at = assigned_at = T+60`, `supply_id = car_at_kezar_stadium`, `reassign_count = 0`, `ridepool_type = p0d0`, `eta_at_assignment_seconds = 0`, `driver_arrived_at = pickup_at = T+60`, `dropoff_at = T+654`, `wait_seconds = 0`, `trip_distance_meters = 5940`, `trip_duration_seconds = 594`, `direct_distance_meters = 5940`, `direct_duration_seconds = 594`, `detour_ratio = 1.0`, `pickup_distance_meters = 0`, `max_co_riders = 0`, `canceled_at` and `cancel_reason` empty.
 - **Event log:** `online` (T), `plan_updated` (T+60), `arrived_pickup` (T+60), `pickup` (T+60), `arrived_dropoff` (T+654), `dropoff` (T+654), `idle` (T+654), each with `lat`, `lng`, `state_after`, `request_id`, `plan_id`, `seats_in_use` and `odometer_meters` (0 until the dropoff rows, then 5940). The polyline and `plan` cells match the router output.
 - **Supply summary:** `online_at = T`, `offline_at` empty, `idle_seconds = 60`, `en_route_seconds = 0`, `on_trip_seconds = 594`, `idle_meters = 0`, `en_route_meters = 0`, `on_trip_meters = 5940`, `requests_served = 1`, `utilization = 594 / 654`, `deadhead_ratio = 0`, `full_polyline` from Kezar Stadium to Coit Tower.
+- **Run metadata:** `simulator_version`, the three SHA-256 hashes, `settings` JSON, `simulation_start_at = T+60`, `simulation_end_at = T+654`.
 - **Run summary:** 1 completed, 0 canceled, median and p90 wait 0, mean detour ratio 1.0, 1 matcher call with trigger `request` (plus 0 for each other trigger).
 
 ### 2. `idle_car_drives_to_pickup`
@@ -115,14 +116,14 @@ Cases 1 and 4 are the **exhaustive output tests**: they assert every field of ev
 - **Purpose:** Verifies every output field when two riders share a car, including the detour fields.
 - **Fixtures:** `pooling_enabled.toml`, `one_car_at_kezar_stadium.csv`, `simple_pool.csv`
 - **Plan:** at T+120 the car is 600 m along its route, and the plan becomes pickup `painted_ladies_to_union_square`, dropoff `painted_ladies_to_union_square`, dropoff `kezar_stadium_to_coit_tower` (595 s, against 713 s and 1168 s for the other insertions).
-- **Trip `painted_ladies_to_union_square`:** `requested_at = assigned_at = T+120`, `eta_at_assignment_seconds = 176`, `driver_arrived_at = pickup_at = T+296`, `wait_seconds = 176`, `pickup_distance_meters = 1763`, `dropoff_at = T+554`, `trip_distance_meters = direct_distance_meters = 2583`, `trip_duration_seconds = 258`, `detour_ratio = 1.0`, `ridepool_type = p0d0`.
-- **Trip `kezar_stadium_to_coit_tower`:** as in case 1, except `ridepool_type = p0p1d1d0`, `dropoff_at = T+715`, `trip_distance_meters = 6554`, `trip_duration_seconds = 655`, `detour_ratio = 6554 / 5940`.
+- **Trip `painted_ladies_to_union_square`:** `requested_at = assigned_at = T+120`, `eta_at_assignment_seconds = 176`, `driver_arrived_at = pickup_at = T+296`, `wait_seconds = 176`, `pickup_distance_meters = 1763`, `dropoff_at = T+554`, `trip_distance_meters = direct_distance_meters = 2583`, `trip_duration_seconds = 258`, `direct_duration_seconds = 258`, `detour_ratio = 1.0`, `ridepool_type = p0d0`, `max_co_riders = 1`.
+- **Trip `kezar_stadium_to_coit_tower`:** as in case 1, except `ridepool_type = p0p1d1d0`, `dropoff_at = T+715`, `trip_distance_meters = 6554`, `trip_duration_seconds = 655`, `direct_duration_seconds = 594`, `detour_ratio = 6554 / 5940`, `max_co_riders = 1`.
 - **Event log and summaries:** every row and field is asserted, as in case 1. Max `seats_in_use = 2`, final `odometer_meters = 6554`, `on_trip_meters = 6554`, `requests_served = 2`.
 
 ### 5. `pooling_off_serves_requests_one_after_another`
 
 - **Fixtures:** `base_default.toml`, `one_car_at_kezar_stadium.csv`, `simple_pool.csv`
-- **Assert:** `painted_ladies_to_union_square` has `ridepool_type = d1p0d0` and `pickup_at = T+1030`. `seats_in_use` never exceeds 1.
+- **Assert:** `painted_ladies_to_union_square` has `ridepool_type = d1p0d0` and `pickup_at = T+1030`, `max_co_riders = 0`. `seats_in_use` never exceeds 1.
 
 ### 6. `party_of_four_cannot_pool`
 
@@ -177,4 +178,9 @@ Cases 1 and 4 are the **exhaustive output tests**: they assert every field of ev
 ### 16. `same_inputs_give_identical_outputs`
 
 - **Fixtures:** `pooling_enabled.toml`, `one_car_at_kezar_stadium.csv`, `simple_pool.csv`
-- **Assert:** two runs produce byte-identical trips, supply event log and supply summary (run summary excluding timings).
+- **Assert:** two runs produce byte-identical trips, supply event log and supply summary (run summary excluding timings), and identical run metadata.
+
+### 17. `input_hashes_pair_runs_with_different_settings`
+
+- **Fixtures:** `pooling_enabled.toml` and `base_default.toml`, each with `one_car_at_kezar_stadium.csv` and `simple_pool.csv`
+- **Assert:** `requests_sha256` and `supply_sha256` match across the two runs; `settings_sha256` differs.

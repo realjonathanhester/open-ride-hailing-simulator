@@ -27,6 +27,8 @@ func TestSimplePool(t *testing.T) {
 	assertEquals(t, second["dropoff_at"], at(554))
 	assertEquals(t, second["trip_distance_meters"], "2583")
 	assertEquals(t, second["direct_distance_meters"], "2583")
+	assertEquals(t, second["direct_duration_seconds"], "258")
+	assertEquals(t, second["max_co_riders"], "1")
 	assertEquals(t, second["trip_duration_seconds"], "258")
 	assertEquals(t, second["detour_ratio"], "1.000000")
 
@@ -37,6 +39,8 @@ func TestSimplePool(t *testing.T) {
 	assertEquals(t, first["dropoff_at"], at(715))
 	assertEquals(t, first["trip_distance_meters"], "6554")
 	assertEquals(t, first["trip_duration_seconds"], "655")
+	assertEquals(t, first["direct_duration_seconds"], "594")
+	assertEquals(t, first["max_co_riders"], "1")
 	assertEquals(t, first["detour_ratio"], strconv.FormatFloat(6554.0/5940.0, 'f', 6, 64))
 
 	// At T+120 the car is 600 m along and picks up the second rider on the way.
@@ -57,6 +61,7 @@ func TestSimplePool(t *testing.T) {
 
 	// Every remaining cell is pinned by the full expected files.
 	assertFile(t, "trips", o.files[runner.TripsFile], expectedSimplePoolTrips)
+	assertFile(t, "run metadata", o.files[runner.RunMetadataFile], expectedSimplePoolRunMetadata)
 	assertFile(t, "supply event log", o.files[runner.SupplyEventsFile], expectedSimplePoolSupplyEventLog)
 	assertFile(t, "supply summary", o.files[runner.SupplySummaryFile], expectedSimplePoolSupplySummary)
 	assertFile(t, "run summary", o.runSummaryWithoutTimings(), expectedSimplePoolRunSummary)
@@ -68,6 +73,7 @@ func TestPoolingOffServesRequestsOneAfterAnother(t *testing.T) {
 	trip := o.trip("painted_ladies_to_union_square")
 	assertEquals(t, trip["ridepool_type"], "d1p0d0")
 	assertEquals(t, trip["pickup_at"], at(1030))
+	assertEquals(t, trip["max_co_riders"], "0") // forward dispatch, never shared
 	for _, event := range o.events("car_at_kezar_stadium") {
 		if event["seats_in_use"] != "0" && event["seats_in_use"] != "1" {
 			t.Errorf("seats_in_use = %s at %s, want at most 1", event["seats_in_use"], event["at"])

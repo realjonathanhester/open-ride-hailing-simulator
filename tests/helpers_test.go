@@ -45,7 +45,7 @@ func simulate(t *testing.T, settings, supply, demand string) outputs {
 		t.Fatalf("simulation failed: %v", err)
 	}
 	o := outputs{files: map[string]string{}, t: t}
-	for _, name := range []string{runner.TripsFile, runner.SupplyEventsFile, runner.SupplySummaryFile, runner.RunSummaryFile} {
+	for _, name := range []string{runner.TripsFile, runner.SupplyEventsFile, runner.SupplySummaryFile, runner.RunSummaryFile, runner.RunMetadataFile} {
 		content, err := os.ReadFile(filepath.Join(directory, name))
 		if err != nil {
 			t.Fatal(err)
@@ -92,6 +92,11 @@ func (o outputs) trip(requestID string) map[string]string {
 	}
 	o.t.Fatalf("no trip %s", requestID)
 	return nil
+}
+
+func (o outputs) runMetadata() map[string]string {
+	o.t.Helper()
+	return o.rows(runner.RunMetadataFile)[0]
 }
 
 func (o outputs) supplySummary(supplyID string) map[string]string {
@@ -200,6 +205,9 @@ func assertValidTrip(t *testing.T, trip map[string]string) {
 		}
 		if directMeters > 0 && trip["detour_ratio"] != strconv.FormatFloat(float64(tripMeters)/float64(directMeters), 'f', 6, 64) {
 			t.Errorf("%s: detour_ratio != trip_distance_meters / direct_distance_meters", id)
+		}
+		if number(t, trip["direct_duration_seconds"]) < 0 || number(t, trip["max_co_riders"]) < 0 {
+			t.Errorf("%s: negative direct_duration_seconds or max_co_riders", id)
 		}
 		ridepool := trip["ridepool_type"]
 		if !strings.Contains(ridepool, "p0") || !strings.HasSuffix(ridepool, "d0") {

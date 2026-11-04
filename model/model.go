@@ -9,20 +9,20 @@ type Location struct {
 
 // Settings is the resolved settings object with defaults filled in.
 type Settings struct {
-	MaxRequestToAssignmentSeconds *int64
-	MaxRequestToPickupSeconds     *int64
-	PoolingEnabled                bool
-	ReassignmentEnabled           bool
-	BatchMatchingIntervalSeconds  *int64
-	PickupDwellSeconds            int64
-	DropoffDwellSeconds           int64
-	DefaultNumRequestedSeats      int
-	DefaultNumAvailableSeats      int
-	AverageSpeedMetersPerSecond   float64
+	MaxRequestToAssignmentSeconds *int64  `json:"max_request_to_assignment_seconds"`
+	MaxRequestToPickupSeconds     *int64  `json:"max_request_to_pickup_seconds"`
+	PoolingEnabled                bool    `json:"pooling_enabled"`
+	ReassignmentEnabled           bool    `json:"reassignment_enabled"`
+	BatchMatchingIntervalSeconds  *int64  `json:"batch_matching_interval_seconds"`
+	PickupDwellSeconds            int64   `json:"pickup_dwell_seconds"`
+	DropoffDwellSeconds           int64   `json:"dropoff_dwell_seconds"`
+	DefaultNumRequestedSeats      int     `json:"default_num_requested_seats"`
+	DefaultNumAvailableSeats      int     `json:"default_num_available_seats"`
+	AverageSpeedMetersPerSecond   float64 `json:"average_speed_meters_per_second"`
 
-	MatchingHook string
-	RoutingHook  string
-	IO           IOSettings
+	MatchingHook string     `json:"matching_hook"`
+	RoutingHook  string     `json:"routing_hook"`
+	IO           IOSettings `json:"-"`
 }
 
 // IOSettings names the reader and writer plugins and their options.

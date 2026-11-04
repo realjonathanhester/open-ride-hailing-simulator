@@ -27,8 +27,10 @@ func TestSingleTripFromCarAtOrigin(t *testing.T) {
 	assertEquals(t, trip["trip_distance_meters"], "5940")
 	assertEquals(t, trip["trip_duration_seconds"], "594")
 	assertEquals(t, trip["direct_distance_meters"], "5940")
+	assertEquals(t, trip["direct_duration_seconds"], "594")
 	assertEquals(t, trip["detour_ratio"], "1.000000")
 	assertEquals(t, trip["pickup_distance_meters"], "0")
+	assertEquals(t, trip["max_co_riders"], "0")
 	assertEquals(t, trip["canceled_at"], "")
 	assertEquals(t, trip["cancel_reason"], "")
 
@@ -75,9 +77,15 @@ func TestSingleTripFromCarAtOrigin(t *testing.T) {
 	assertEquals(t, run["matcher_calls_supply_offline"], "0")
 	assertEquals(t, run["matcher_calls_batch_tick"], "0")
 
+	metadata := o.runMetadata()
+	assertEquals(t, metadata["simulator_version"], "0.2.0")
+	assertEquals(t, metadata["simulation_start_at"], at(60))
+	assertEquals(t, metadata["simulation_end_at"], at(654))
+
 	// Every remaining cell (coordinates, polylines, plan ETAs) is pinned by
 	// the full expected files.
 	assertFile(t, "trips", o.files[runner.TripsFile], expectedSingleTripTrips)
+	assertFile(t, "run metadata", o.files[runner.RunMetadataFile], expectedSingleTripRunMetadata)
 	assertFile(t, "supply event log", o.files[runner.SupplyEventsFile], expectedSingleTripSupplyEventLog)
 	assertFile(t, "supply summary", o.files[runner.SupplySummaryFile], expectedSingleTripSupplySummary)
 	assertFile(t, "run summary", o.runSummaryWithoutTimings(), expectedSingleTripRunSummary)
@@ -148,4 +156,17 @@ func TestSameInputsGiveIdenticalOutputs(t *testing.T) {
 	assertFile(t, "supply event log", second.files[runner.SupplyEventsFile], first.files[runner.SupplyEventsFile])
 	assertFile(t, "supply summary", second.files[runner.SupplySummaryFile], first.files[runner.SupplySummaryFile])
 	assertFile(t, "run summary", second.runSummaryWithoutTimings(), first.runSummaryWithoutTimings())
+	assertFile(t, "run metadata", second.files[runner.RunMetadataFile], first.files[runner.RunMetadataFile])
+}
+
+// Same requests and supply with different settings: the input hashes match
+// (the runs are paired) and only the settings hash differs.
+func TestInputHashesPairRunsWithDifferentSettings(t *testing.T) {
+	pooled := simulate(t, "pooling_enabled", "one_car_at_kezar_stadium", "simple_pool").runMetadata()
+	unpooled := simulate(t, "base_default", "one_car_at_kezar_stadium", "simple_pool").runMetadata()
+	assertEquals(t, unpooled["requests_sha256"], pooled["requests_sha256"])
+	assertEquals(t, unpooled["supply_sha256"], pooled["supply_sha256"])
+	if unpooled["settings_sha256"] == pooled["settings_sha256"] {
+		t.Errorf("settings_sha256 should differ when pooling_enabled differs")
+	}
 }

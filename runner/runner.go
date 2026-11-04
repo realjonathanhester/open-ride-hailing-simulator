@@ -20,6 +20,7 @@ const (
 	SupplyEventsFile  = "supply_event_log.csv"
 	SupplySummaryFile = "supply_summary.csv"
 	RunSummaryFile    = "run_summary.csv"
+	RunMetadataFile   = "run_metadata.csv"
 )
 
 // Paths overrides the [io] paths from the settings file when non-empty.
@@ -95,6 +96,7 @@ func RunFiles(settingsPath string, paths Paths) (*simulator.Result, error) {
 		{SupplyEventsFile, simulator.SupplyEventColumns, result.SupplyEvents},
 		{SupplySummaryFile, simulator.SupplySummaryColumns, result.SupplySummary},
 		{RunSummaryFile, simulator.RunSummaryColumns, result.RunSummary},
+		{RunMetadataFile, simulator.RunMetadataColumns, result.RunMetadata},
 	}
 	for _, o := range outputs {
 		if err := write(&csvio.Writer{Path: filepath.Join(settings.IO.OutputDirectory, o.name)}, o.columns, o.rows); err != nil {

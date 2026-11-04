@@ -34,29 +34,31 @@ type planStop struct {
 }
 
 type request struct {
-	arrived              bool
-	input                model.Request
-	seats                int
-	status               string
-	supplyID             string
-	previousSupplyID     string
-	firstAssignedAt      *int64
-	assignedAt           *int64
-	reassignCount        int
-	etaAtAssignment      *int64
-	driverArrivedAt      *int64
-	pickupAt             *int64
-	dropoffAt            *int64
-	canceledAt           *int64
-	cancelReason         string
-	actionIndexAtAssign  int
-	odometerAtAssign     int64
-	odometerAtPickup     int64
-	odometerAtDropoff    int64
-	directDistanceMeters int64
-	ridepoolType         string
-	assignmentDeadline   *int64
-	pickupDeadline       *int64
+	arrived               bool
+	input                 model.Request
+	seats                 int
+	status                string
+	supplyID              string
+	previousSupplyID      string
+	firstAssignedAt       *int64
+	assignedAt            *int64
+	reassignCount         int
+	etaAtAssignment       *int64
+	driverArrivedAt       *int64
+	pickupAt              *int64
+	dropoffAt             *int64
+	canceledAt            *int64
+	cancelReason          string
+	actionIndexAtAssign   int
+	odometerAtAssign      int64
+	odometerAtPickup      int64
+	odometerAtDropoff     int64
+	directDistanceMeters  int64
+	directDurationSeconds int64
+	maxCoRiders           int
+	ridepoolType          string
+	assignmentDeadline    *int64
+	pickupDeadline        *int64
 }
 
 type car struct {
@@ -188,7 +190,7 @@ func (s *Simulator) Run(requests []model.Request, supplies []model.Supply) (*Res
 		if err != nil {
 			return nil, fmt.Errorf("request %s: %w", in.RequestID, err)
 		}
-		r.directDistanceMeters = legs[0].DistanceMeters
+		r.directDistanceMeters, r.directDurationSeconds = legs[0].DistanceMeters, legs[0].DurationSeconds
 		s.requests[in.RequestID] = r
 		s.requestOrder = append(s.requestOrder, in.RequestID)
 		s.push(&event{at: in.RequestedAt, priority: priorityRequest, id: in.RequestID, kind: eventRequest})
@@ -233,7 +235,9 @@ func (s *Simulator) Run(requests []model.Request, supplies []model.Supply) (*Res
 			s.sync(c)
 		}
 	}
-	return s.result(), nil
+	result := s.result()
+	result.RunMetadata = s.runMetadata(requests, supplies)
+	return result, nil
 }
 
 func (s *Simulator) isLive(e *event) bool {
@@ -485,6 +489,11 @@ func (s *Simulator) finishStop(c *car) {
 	if stop.Type == model.Pickup {
 		c.aboard[stop.RequestID] = stop.seats
 		c.seatsInUse += stop.seats
+		for id := range c.aboard {
+			if other := s.requests[id]; len(c.aboard)-1 > other.maxCoRiders {
+				other.maxCoRiders = len(c.aboard) - 1
+			}
+		}
 		r.pickupAt, r.status, r.odometerAtPickup = &at, model.StatusOnTrip, c.baseOdometer
 		s.log(c, "pickup", stop.RequestID, nil)
 	} else {
