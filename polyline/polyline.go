@@ -33,3 +33,34 @@ func encodeValue(b *strings.Builder, v int64) {
 	}
 	b.WriteByte(byte(v + 63))
 }
+
+// Decode parses an encoded polyline string (precision 5).
+func Decode(encoded string) []model.Location {
+	var points []model.Location
+	var lat, lng int64
+	for i := 0; i < len(encoded); {
+		var deltas [2]int64
+		for k := 0; k < 2; k++ {
+			var result int64
+			shift := uint(0)
+			for i < len(encoded) {
+				b := int64(encoded[i]) - 63
+				i++
+				result |= (b & 0x1f) << shift
+				shift += 5
+				if b < 0x20 {
+					break
+				}
+			}
+			if result&1 != 0 {
+				deltas[k] = ^(result >> 1)
+			} else {
+				deltas[k] = result >> 1
+			}
+		}
+		lat += deltas[0]
+		lng += deltas[1]
+		points = append(points, model.Location{Lat: float64(lat) / 1e5, Lng: float64(lng) / 1e5})
+	}
+	return points
+}
