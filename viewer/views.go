@@ -115,12 +115,11 @@ func (r *Run) TripView(requestID string) (TripView, bool) {
 			view.SupplyLink += "?at=" + assigned
 		}
 	}
-	seen := map[string]bool{}
-	for _, event := range r.Events {
-		id := event["supply_id"]
-		if id != supplyID && !seen[id] && event["action"] == "plan_updated" && planContains(event["plan"], requestID) {
-			seen[id] = true
-			view.EarlierSupplyIDs = append(view.EarlierSupplyIDs, id)
+	if facts := r.requests()[requestID]; facts != nil {
+		for id := range facts.planCars {
+			if id != supplyID {
+				view.EarlierSupplyIDs = append(view.EarlierSupplyIDs, id)
+			}
 		}
 	}
 	sort.Strings(view.EarlierSupplyIDs)
@@ -196,19 +195,10 @@ func (r *Run) TripView(requestID string) (TripView, bool) {
 
 // requestEnds finds the origin and destination from any plan that lists them.
 func (r *Run) requestEnds(requestID string) (model.Location, model.Location) {
-	var origin, destination model.Location
-	for _, event := range r.Events {
-		for _, stop := range parsePlan(event["plan"]) {
-			if stop.RequestID == requestID {
-				if stop.Type == "pickup" {
-					origin = model.Location{Lat: stop.Lat, Lng: stop.Lng}
-				} else {
-					destination = model.Location{Lat: stop.Lat, Lng: stop.Lng}
-				}
-			}
-		}
+	if facts := r.requests()[requestID]; facts != nil {
+		return facts.ends[0], facts.ends[1]
 	}
-	return origin, destination
+	return model.Location{}, model.Location{}
 }
 
 // StateSegment is a piece of a car's driven path, colored by state.

@@ -1,6 +1,8 @@
 package tests
 
 import (
+	"bytes"
+	"compress/gzip"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -230,4 +232,91 @@ func TestPagesWorkWithoutMapsKey(t *testing.T) {
 	}
 	assertEquals(t, strconv.Itoa(get(t, server.URL+"/trips/kezar_stadium_to_coit_tower", nil)), "200")
 	assertEquals(t, strconv.Itoa(get(t, server.URL+"/api/decisions", nil)), "501") // placeholder
+}
+
+func fetchBody(t *testing.T, url, encoding string) (*http.Response, []byte) {
+	t.Helper()
+	request, _ := http.NewRequest(http.MethodGet, url, nil)
+	request.Header.Set("Accept-Encoding", encoding)
+	client := &http.Client{Transport: &http.Transport{DisableCompression: true}} // keep the raw bytes
+	response, err := client.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	body, _ := io.ReadAll(response.Body)
+	return response, body
+}
+
+func TestApiResponsesAreGzippedWhenAccepted(t *testing.T) {
+	server := serve(t, viewer.Config{Run: simulateForViewer(t, "pooling_enabled", "one_car_at_kezar_stadium", "simple_pool")})
+	for _, path := range []string{"/api/dashboard", "/api/trips", "/api/playback", "/api/trips/unknown"} {
+		plainResponse, plain := fetchBody(t, server.URL+path, "identity")
+		assertEquals(t, plainResponse.Header.Get("Content-Encoding"), "")
+		zippedResponse, zipped := fetchBody(t, server.URL+path, "gzip")
+		assertEquals(t, zippedResponse.Header.Get("Content-Encoding"), "gzip")
+		assertEquals(t, strconv.Itoa(zippedResponse.StatusCode), strconv.Itoa(plainResponse.StatusCode))
+		reader, err := gzip.NewReader(bytes.NewReader(zipped))
+		if err != nil {
+			t.Fatalf("%s: %v", path, err)
+		}
+		unzipped, _ := io.ReadAll(reader)
+		assertEquals(t, string(unzipped), string(plain))
+	}
+	page, _ := fetchBody(t, server.URL+"/", "gzip")
+	assertEquals(t, page.Header.Get("Content-Encoding"), "") // static UI files are served as they are
+}
+
+// The dashboard timeline must match a direct count at every sample: requests
+// open (requested, not yet picked up or canceled) and each car's latest state.
+func TestDashboardTimelineMatchesDirectCount(t *testing.T) {
+	run := simulateForViewer(t, "pooling_enabled", "one_car_at_kezar_stadium", "simple_pool")
+	server := serve(t, viewer.Config{Run: run})
+	var dashboard struct {
+		Timeline []struct {
+			At           int64          `json:"at"`
+			OpenRequests int            `json:"open_requests"`
+			CarsByState  map[string]int `json:"cars_by_state"`
+		} `json:"timeline"`
+	}
+	get(t, server.URL+"/api/dashboard", &dashboard)
+	if len(dashboard.Timeline) < 2 {
+		t.Fatalf("timeline has %d samples", len(dashboard.Timeline))
+	}
+	number := func(row viewer.Row, field string) (int64, bool) {
+		v, err := strconv.ParseInt(row[field], 10, 64)
+		return v, err == nil
+	}
+	sawOpen := false
+	for _, point := range dashboard.Timeline {
+		open := 0
+		for _, trip := range run.Trips {
+			requested, _ := number(trip, "requested_at")
+			closed, ok := number(trip, "pickup_at")
+			if !ok {
+				closed, ok = number(trip, "canceled_at")
+			}
+			if requested <= point.At && (!ok || point.At < closed) {
+				open++
+			}
+		}
+		sawOpen = sawOpen || open > 0
+		assertEquals(t, strconv.Itoa(point.OpenRequests), strconv.Itoa(open))
+		states := map[string]int{}
+		for _, supply := range run.SupplySummary {
+			state := "offline"
+			for _, event := range run.Events {
+				if at, _ := number(event, "at"); event["supply_id"] == supply["supply_id"] && at <= point.At {
+					state = event["state_after"]
+				}
+			}
+			states[state]++
+		}
+		encodedWant, _ := json.Marshal(states)
+		encodedGot, _ := json.Marshal(point.CarsByState)
+		assertEquals(t, string(encodedGot), string(encodedWant))
+	}
+	if !sawOpen {
+		t.Errorf("fixture should have an open request at some sample")
+	}
 }

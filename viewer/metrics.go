@@ -134,8 +134,14 @@ func (b *metricBuilder) stats(group, anchor, name, better string, values []float
 	}
 }
 
-// Dashboard computes every aggregate metric from the spec.
+// Dashboard returns every aggregate metric from the spec. It is computed once
+// per run and cached; callers must not modify the result.
 func (r *Run) Dashboard() Dashboard {
+	r.dashboardOnce.Do(func() { r.dashboard = r.buildDashboard() })
+	return r.dashboard
+}
+
+func (r *Run) buildDashboard() Dashboard {
 	b := &metricBuilder{}
 	d := Dashboard{StartAt: r.startAt(), EndAt: r.endAt(), Distributions: map[string][]Bucket{}}
 
@@ -305,35 +311,78 @@ func (r *Run) Dashboard() Dashboard {
 }
 
 // timeline samples open requests and cars by state every bucketSeconds.
+// It sweeps each trip and each car's event log once instead of rescanning
+// everything at every sample, so it is linear in trips + events + samples.
 func (r *Run) timeline(bucketSeconds int64) []TimelinePoint {
-	points := []TimelinePoint{}
-	for t := r.startAt(); t <= r.endAt(); t += bucketSeconds {
-		point := TimelinePoint{At: t, CarsByState: map[string]int{}}
-		for _, trip := range r.Trips {
-			requested, _ := integer(trip, "requested_at")
-			if requested > t {
-				continue
-			}
-			closed := int64(math.MaxInt64)
-			if v, ok := integer(trip, "pickup_at"); ok {
-				closed = v
-			} else if v, ok := integer(trip, "canceled_at"); ok {
-				closed = v
-			}
-			if t < closed {
-				point.OpenRequests++
+	start, end := r.startAt(), r.endAt()
+	if end < start {
+		return []TimelinePoint{}
+	}
+	samples := int((end-start)/bucketSeconds) + 1
+	at := func(i int) int64 { return start + int64(i)*bucketSeconds }
+	// firstSample is the first sample index whose time is >= t.
+	firstSample := func(t int64) int {
+		if t <= start {
+			return 0
+		}
+		i := (t - start + bucketSeconds - 1) / bucketSeconds
+		if i > int64(samples) {
+			return samples
+		}
+		return int(i)
+	}
+	open := make([]int, samples+1) // difference array
+	for _, trip := range r.Trips {
+		requested, _ := integer(trip, "requested_at")
+		from := firstSample(requested)
+		until := samples // first sample with t >= closed is excluded
+		if v, ok := integer(trip, "pickup_at"); ok {
+			until = firstSample(v)
+		} else if v, ok := integer(trip, "canceled_at"); ok {
+			until = firstSample(v)
+		}
+		if from < until {
+			open[from]++
+			open[until]--
+		}
+	}
+	points := make([]TimelinePoint, samples)
+	for i := range points {
+		points[i] = TimelinePoint{At: at(i), CarsByState: map[string]int{}}
+	}
+	for _, id := range r.supplyIDs {
+		rows := r.eventsBySupply[id]
+		times := make([]int64, len(rows))
+		sorted := true
+		for k, i := range rows {
+			times[k], _ = integer(r.Events[i], "at")
+			if k > 0 && times[k] < times[k-1] {
+				sorted = false
 			}
 		}
-		for _, id := range r.supplyIDs {
-			state := "offline"
-			for _, i := range r.eventsBySupply[id] {
-				if at, _ := integer(r.Events[i], "at"); at <= t {
-					state = r.Events[i]["state_after"]
+		state, k := "offline", 0
+		for s := 0; s < samples; s++ {
+			t := at(s)
+			if sorted {
+				for k < len(rows) && times[k] <= t {
+					state = r.Events[rows[k]]["state_after"]
+					k++
+				}
+			} else { // the last row in file order at or before t wins
+				state = "offline"
+				for j, i := range rows {
+					if times[j] <= t {
+						state = r.Events[i]["state_after"]
+					}
 				}
 			}
-			point.CarsByState[state]++
+			points[s].CarsByState[state]++
 		}
-		points = append(points, point)
+	}
+	running := 0
+	for s := range points {
+		running += open[s]
+		points[s].OpenRequests = running
 	}
 	return points
 }

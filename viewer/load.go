@@ -9,7 +9,9 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
+	"sync"
 
+	"github.com/realjonathanhester/ride-hailing-simulator/model"
 	"github.com/realjonathanhester/ride-hailing-simulator/runner"
 )
 
@@ -83,6 +85,54 @@ type Run struct {
 	eventsBySupply map[string][]int
 	supplyByID     map[string]Row
 	supplyIDs      []string
+
+	// Built lazily on first use, then shared by every request.
+	dashboardOnce sync.Once
+	dashboard     Dashboard
+	requestsOnce  sync.Once
+	requestIndex  map[string]*requestFacts
+	playbackOnce  sync.Once
+	playbackCache *playbackIndex
+}
+
+// requestFacts is what every plan in the supply event log says about one request.
+type requestFacts struct {
+	ends     [2]model.Location // pickup and dropoff stop, from the last plan listing each
+	planCars map[string]bool   // supply_ids with a plan_updated row listing the request
+}
+
+// requests indexes every plan cell once, so trip pages and playback windows
+// need not parse the whole supply event log again.
+func (r *Run) requests() map[string]*requestFacts {
+	r.requestsOnce.Do(func() {
+		index := map[string]*requestFacts{}
+		for _, event := range r.Events {
+			for _, stop := range parsePlan(event["plan"]) {
+				facts := index[stop.RequestID]
+				if facts == nil {
+					facts = &requestFacts{planCars: map[string]bool{}}
+					index[stop.RequestID] = facts
+				}
+				if stop.Type == "pickup" {
+					facts.ends[0] = model.Location{Lat: stop.Lat, Lng: stop.Lng}
+				} else {
+					facts.ends[1] = model.Location{Lat: stop.Lat, Lng: stop.Lng}
+				}
+				if event["action"] == "plan_updated" {
+					facts.planCars[event["supply_id"]] = true
+				}
+			}
+		}
+		r.requestIndex = index
+	})
+	return r.requestIndex
+}
+
+// Warm builds the cached aggregates and indexes ahead of the first request.
+func (r *Run) Warm() {
+	r.requests()
+	r.Dashboard()
+	r.playbackIndex()
 }
 
 // LoadRun reads every output table and indexes it.
