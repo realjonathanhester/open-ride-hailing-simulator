@@ -62,86 +62,104 @@ func optionalInteger(row Row, field string) *int64 {
 
 func overlaps(start, end, from, to int64) bool { return start <= to && end >= from }
 
-// Playback returns the car segments and request spans overlapping [from, to].
-func (r *Run) Playback(from, to int64) Playback {
-	playback := Playback{From: from, To: to, SimulationStartAt: r.startAt(), SimulationEndAt: r.endAt(), Cars: []PlaybackCar{}, Requests: []PlaybackRequest{}}
-	for _, supplyID := range r.supplyIDs {
-		car := PlaybackCar{SupplyID: supplyID, Link: "/supply/" + supplyID, Segments: []CarSegment{}}
-		rows := r.eventsBySupply[supplyID]
-		aboard := 0
-		for k, i := range rows {
-			event := r.Events[i]
-			start, _ := integer(event, "at")
-			here := location(event)
-			var end int64
-			var there *model.Location
-			if k+1 < len(rows) {
-				next := r.Events[rows[k+1]]
-				end, _ = integer(next, "at")
-				there = location(next)
-			} else if event["state_after"] != "offline" {
-				end, there = r.endAt(), here
+// playbackIndex is every car segment and request span of a run, built once.
+type playbackIndex struct {
+	cars     []PlaybackCar     // every segment of every car, by supply_id
+	requests []PlaybackRequest // every request with known stops, sorted
+	visible  []int64           // visibleUntil for each entry of requests
+}
+
+func (r *Run) playbackIndex() *playbackIndex {
+	r.playbackOnce.Do(func() {
+		index := &playbackIndex{}
+		for _, supplyID := range r.supplyIDs {
+			car := PlaybackCar{SupplyID: supplyID, Link: "/supply/" + supplyID}
+			rows := r.eventsBySupply[supplyID]
+			aboard := 0
+			for k, i := range rows {
+				event := r.Events[i]
+				start, _ := integer(event, "at")
+				here := location(event)
+				var end int64
+				var there *model.Location
+				if k+1 < len(rows) {
+					next := r.Events[rows[k+1]]
+					end, _ = integer(next, "at")
+					there = location(next)
+				} else if event["state_after"] != "offline" {
+					end, there = r.endAt(), here
+				}
+				switch event["action"] {
+				case "pickup":
+					aboard++
+				case "dropoff":
+					aboard--
+				}
+				if here == nil || there == nil || end <= start {
+					continue
+				}
+				car.Segments = append(car.Segments, CarSegment{StartAt: start, EndAt: end, From: *here, To: *there, State: event["state_after"], RidersAboard: aboard})
 			}
-			switch event["action"] {
-			case "pickup":
-				aboard++
-			case "dropoff":
-				aboard--
-			}
-			if here == nil || there == nil || end <= start || !overlaps(start, end, from, to) {
+			index.cars = append(index.cars, car)
+		}
+		ends := r.requests()
+		for _, trip := range r.Trips {
+			id := trip["request_id"]
+			facts, known := ends[id]
+			requested, ok := integer(trip, "requested_at")
+			if !known || !ok {
 				continue
 			}
-			car.Segments = append(car.Segments, CarSegment{StartAt: start, EndAt: end, From: *here, To: *there, State: event["state_after"], RidersAboard: aboard})
+			index.requests = append(index.requests, PlaybackRequest{RequestID: id, Link: "/trips/" + id, Status: trip["status"], SupplyID: trip["supply_id"],
+				Origin: facts.ends[0], Destination: facts.ends[1], RequestedAt: requested,
+				PickupAt: optionalInteger(trip, "pickup_at"), DropoffAt: optionalInteger(trip, "dropoff_at"), CanceledAt: optionalInteger(trip, "canceled_at")})
+		}
+		sort.SliceStable(index.requests, func(i, j int) bool {
+			a, b := index.requests[i], index.requests[j]
+			if a.RequestedAt != b.RequestedAt {
+				return a.RequestedAt < b.RequestedAt
+			}
+			return a.RequestID < b.RequestID
+		})
+		for _, request := range index.requests {
+			visibleUntil := r.endAt()
+			switch {
+			case request.DropoffAt != nil:
+				visibleUntil = *request.DropoffAt
+			case request.CanceledAt != nil:
+				visibleUntil = *request.CanceledAt
+			}
+			index.visible = append(index.visible, visibleUntil)
+		}
+		r.playbackCache = index
+	})
+	return r.playbackCache
+}
+
+// Playback returns the car segments and request spans overlapping [from, to].
+// It filters a per-run index built on first use instead of rescanning the
+// supply event log for every window.
+func (r *Run) Playback(from, to int64) Playback {
+	playback := Playback{From: from, To: to, SimulationStartAt: r.startAt(), SimulationEndAt: r.endAt(), Cars: []PlaybackCar{}, Requests: []PlaybackRequest{}}
+	index := r.playbackIndex()
+	for _, all := range index.cars {
+		car := PlaybackCar{SupplyID: all.SupplyID, Link: all.Link, Segments: []CarSegment{}}
+		for _, segment := range all.Segments {
+			if overlaps(segment.StartAt, segment.EndAt, from, to) {
+				car.Segments = append(car.Segments, segment)
+			}
 		}
 		if len(car.Segments) > 0 {
 			playback.Cars = append(playback.Cars, car)
 		}
 	}
-	ends := r.allRequestEnds()
-	for _, trip := range r.Trips {
-		id := trip["request_id"]
-		stops, known := ends[id]
-		requested, ok := integer(trip, "requested_at")
-		if !known || !ok {
-			continue
+	for k, request := range index.requests {
+		if request.RequestedAt > to {
+			break // sorted by requested_at
 		}
-		request := PlaybackRequest{RequestID: id, Link: "/trips/" + id, Status: trip["status"], SupplyID: trip["supply_id"],
-			Origin: stops[0], Destination: stops[1], RequestedAt: requested,
-			PickupAt: optionalInteger(trip, "pickup_at"), DropoffAt: optionalInteger(trip, "dropoff_at"), CanceledAt: optionalInteger(trip, "canceled_at")}
-		visibleUntil := r.endAt()
-		switch {
-		case request.DropoffAt != nil:
-			visibleUntil = *request.DropoffAt
-		case request.CanceledAt != nil:
-			visibleUntil = *request.CanceledAt
-		}
-		if overlaps(requested, visibleUntil, from, to) {
+		if overlaps(request.RequestedAt, index.visible[k], from, to) {
 			playback.Requests = append(playback.Requests, request)
 		}
 	}
-	sort.SliceStable(playback.Requests, func(i, j int) bool {
-		a, b := playback.Requests[i], playback.Requests[j]
-		if a.RequestedAt != b.RequestedAt {
-			return a.RequestedAt < b.RequestedAt
-		}
-		return a.RequestID < b.RequestID
-	})
 	return playback
-}
-
-// allRequestEnds maps request_id to [origin, destination] from every plan, in one pass.
-func (r *Run) allRequestEnds() map[string][2]model.Location {
-	ends := map[string][2]model.Location{}
-	for _, event := range r.Events {
-		for _, stop := range parsePlan(event["plan"]) {
-			pair := ends[stop.RequestID]
-			if stop.Type == "pickup" {
-				pair[0] = model.Location{Lat: stop.Lat, Lng: stop.Lng}
-			} else {
-				pair[1] = model.Location{Lat: stop.Lat, Lng: stop.Lng}
-			}
-			ends[stop.RequestID] = pair
-		}
-	}
-	return ends
 }

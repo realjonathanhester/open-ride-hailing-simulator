@@ -1,12 +1,15 @@
 package viewer
 
 import (
+	"compress/gzip"
 	"embed"
 	"encoding/json"
 	"io/fs"
 	"net/http"
 	"sort"
 	"strconv"
+	"strings"
+	"sync"
 )
 
 //go:embed ui
@@ -29,8 +32,12 @@ type Config struct {
 
 // Server serves the UI and the JSON API.
 type Server struct {
-	config Config
-	mux    *http.ServeMux
+	config  Config
+	mux     *http.ServeMux
+	handler http.Handler
+
+	compareOnce sync.Once
+	comparison  Comparison
 }
 
 // NewServer builds the HTTP handler.
@@ -51,10 +58,54 @@ func NewServer(config Config) *Server {
 	s.mux.HandleFunc("GET /api/playback", s.handlePlayback)
 	s.mux.HandleFunc("GET /api/", func(w http.ResponseWriter, r *http.Request) { writeError(w, http.StatusNotFound, "unknown endpoint") })
 	s.mux.HandleFunc("GET /", s.handleIndex)
+	s.handler = gzipResponses(s.mux)
 	return s
 }
 
-func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) { s.mux.ServeHTTP(w, r) }
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) { s.handler.ServeHTTP(w, r) }
+
+// Warm computes the cached dashboards, request indexes and comparison so the
+// first page load does not pay for them. rhs view runs it in the background.
+func (s *Server) Warm() {
+	s.config.Run.Warm()
+	if s.config.Compare != nil {
+		s.config.Compare.Warm()
+		s.cachedComparison()
+	}
+}
+
+func (s *Server) cachedComparison() Comparison {
+	s.compareOnce.Do(func() { s.comparison = Compare(s.config.Run, s.config.Compare) })
+	return s.comparison
+}
+
+type gzipWriter struct {
+	http.ResponseWriter
+	writer *gzip.Writer
+}
+
+func (g gzipWriter) Write(b []byte) (int, error) { return g.writer.Write(b) }
+
+// gzipResponses compresses JSON API responses for clients that accept gzip.
+// The static UI files are small and served as they are.
+func gzipResponses(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasPrefix(r.URL.Path, "/api/") {
+			next.ServeHTTP(w, r)
+			return
+		}
+		w.Header().Add("Vary", "Accept-Encoding")
+		if !strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+			next.ServeHTTP(w, r)
+			return
+		}
+		w.Header().Set("Content-Encoding", "gzip")
+		w.Header().Del("Content-Length")
+		writer, _ := gzip.NewWriterLevel(w, gzip.BestSpeed)
+		defer writer.Close()
+		next.ServeHTTP(gzipWriter{ResponseWriter: w, writer: writer}, r)
+	})
+}
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
@@ -229,7 +280,7 @@ func (s *Server) requireCompare(w http.ResponseWriter) bool {
 
 func (s *Server) handleCompare(w http.ResponseWriter, r *http.Request) {
 	if s.requireCompare(w) {
-		writeJSON(w, http.StatusOK, Compare(s.config.Run, s.config.Compare))
+		writeJSON(w, http.StatusOK, s.cachedComparison())
 	}
 }
 

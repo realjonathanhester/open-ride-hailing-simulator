@@ -87,7 +87,9 @@ func view(args []string) int {
 		fmt.Println("rhs view: no Google Maps API key (set GOOGLE_MAPS_API_KEY); maps are disabled")
 	}
 	fmt.Printf("rhs view: serving http://%s/\n", address)
-	if err := http.ListenAndServe(address, viewer.NewServer(config)); err != nil {
+	server := viewer.NewServer(config)
+	go server.Warm() // precompute dashboards and indexes while the browser opens
+	if err := http.ListenAndServe(address, server); err != nil {
 		fmt.Fprintln(os.Stderr, "rhs view:", err)
 		return 1
 	}

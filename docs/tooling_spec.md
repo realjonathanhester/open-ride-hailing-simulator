@@ -46,6 +46,8 @@ rhs view -output out/ [-compare out2/] [-port 8080] [-settings viewer.toml] [-ti
   - The key is sent only to the browser page served on localhost and is never written to outputs or logs.
   - With no key, every page still works and maps are replaced by a notice.
 - Outputs are read through the same reader plugins as the simulator, so non-CSV outputs work once a reader exists.
+- **Performance:** outputs never change while the viewer runs, so derived data is computed once per run and reused. Right after it starts listening, `rhs view` builds in the background the dashboard (including the timeline), the comparison, an index of what every plan says about each request (origin, destination, and which cars were planned to serve it), and the playback segments. A request that arrives before that finishes computes the same thing on demand and waits for it. Each page then filters or paginates these cached results instead of rescanning the supply event log.
+- `/api/...` responses are gzip-compressed when the browser sends `Accept-Encoding: gzip`, which every browser does; the JSON is the same either way. The embedded UI files are served uncompressed.
 
 ## Conventions
 
@@ -302,3 +304,5 @@ Google's own POI and transit icons are hidden (`clickableIcons: false`, and on r
 12. **Icons:** original inline SVGs (person with a hand raised, checkered flag, top-down car) with no external assets or licenses, used on every map.
 13. **Repositioning:** the viewer shows it as its own state (purple, "Repositioning") on the supply view, the state band, playback cars and counters. The dashboard counts it as idle, the same as the supply summary does.
 14. **Local time:** times show the `T+` offset and the local wall-clock time together; the offset stays because it lines up with spec timings, and wall-clock time is what people read. Zone precedence is flag, viewer settings, run metadata, then browser, so a benchmark can carry its own zone and a person can still override it. The server resolves and validates the IANA name; the browser formats with `Intl.DateTimeFormat`, so no time zone database ships in the UI.
+15. **Viewer performance:** everything derived is cached per run for the life of the server, and the dashboard timeline sweeps each trip and each car's event log once instead of rescanning them at every sample. On the Austin benchmark (10,000 trips, 66,190 event rows) this took the dashboard from about 32 s to a few milliseconds and the comparison from about 70 s to a few milliseconds, with byte-identical JSON. Memory grows by roughly the size of those results; there is no cache invalidation because outputs are read once at startup.
+16. **Compression:** API JSON is gzipped (fastest level) because playback windows and the comparison are hundreds of KB of repetitive JSON; on Austin a one-hour playback window drops from 907 KB to 114 KB. The UI files are small and embedded, so they skip it.
