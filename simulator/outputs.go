@@ -14,7 +14,8 @@ import (
 var (
 	TripColumns = []string{"request_id", "status", "requested_at", "num_requested_seats", "first_assigned_at", "assigned_at", "supply_id",
 		"reassign_count", "ridepool_type", "eta_at_assignment_seconds", "driver_arrived_at", "pickup_at", "dropoff_at", "wait_seconds",
-		"trip_distance_meters", "trip_duration_seconds", "direct_distance_meters", "detour_ratio", "pickup_distance_meters", "canceled_at", "cancel_reason"}
+		"trip_distance_meters", "trip_duration_seconds", "direct_distance_meters", "direct_duration_seconds", "detour_ratio", "pickup_distance_meters",
+		"max_co_riders", "canceled_at", "cancel_reason"}
 	SupplyEventColumns = []string{"supply_id", "at", "action", "lat", "lng", "state_after", "request_id", "plan_id", "seats_in_use",
 		"odometer_meters", "driven_polyline", "planned_polyline", "plan"}
 	SupplySummaryColumns = []string{"supply_id", "online_at", "offline_at", "idle_seconds", "en_route_seconds", "on_trip_seconds",
@@ -34,6 +35,7 @@ type Result struct {
 	SupplyEvents  [][]string
 	SupplySummary [][]string
 	RunSummary    [][]string
+	RunMetadata   [][]string
 }
 
 type planCell struct {
@@ -86,11 +88,12 @@ func (s *Simulator) result() *Result {
 		row := []string{id, r.status, formatInt(r.input.RequestedAt), strconv.Itoa(r.seats), formatOptional(r.firstAssignedAt),
 			formatOptional(r.assignedAt), r.supplyID, strconv.Itoa(r.reassignCount), r.ridepoolType, formatOptional(r.etaAtAssignment),
 			formatOptional(r.driverArrivedAt), formatOptional(r.pickupAt), formatOptional(r.dropoffAt), "", "", "",
-			formatInt(r.directDistanceMeters), "", "", formatOptional(r.canceledAt), r.cancelReason}
+			formatInt(r.directDistanceMeters), formatInt(r.directDurationSeconds), "", "", "", formatOptional(r.canceledAt), r.cancelReason}
 		if r.pickupAt != nil {
 			wait := *r.pickupAt - r.input.RequestedAt
 			row[13] = formatInt(wait)
-			row[18] = formatInt(r.odometerAtPickup - r.odometerAtAssign)
+			row[19] = formatInt(r.odometerAtPickup - r.odometerAtAssign)
+			row[20] = strconv.Itoa(r.maxCoRiders)
 			waits = append(waits, wait)
 		}
 		switch r.status {
@@ -104,7 +107,7 @@ func (s *Simulator) result() *Result {
 				ratio = float64(tripDistance) / float64(r.directDistanceMeters)
 			}
 			detourSum += ratio
-			row[17] = formatRatio(ratio)
+			row[18] = formatRatio(ratio)
 		case model.StatusCanceled:
 			if r.cancelReason == "max_request_to_assignment" {
 				canceledAssignment++

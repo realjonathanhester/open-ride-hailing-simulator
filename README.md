@@ -46,14 +46,14 @@ Matching algorithms are usually evaluated on private data with private tooling. 
 Requires Go 1.22 or newer.
 
 ```sh
-go run ./cmd/orhs \
+go run ./cmd/orhs run \
   -settings tests/fixtures/settings/pooling_enabled.toml \
   -supply tests/fixtures/supply/one_car_at_kezar_stadium.csv \
   -requests tests/fixtures/demand/simple_pool.csv \
   -output out/
 ```
 
-This writes `trips.csv`, `supply_event_log.csv`, `supply_summary.csv` and `run_summary.csv` to `out/`. Paths can also be set in the settings file:
+This writes `trips.csv`, `supply_event_log.csv`, `supply_summary.csv`, `run_summary.csv` and `run_metadata.csv` to `out/`. Paths can also be set in the settings file:
 
 ```toml
 [io]
