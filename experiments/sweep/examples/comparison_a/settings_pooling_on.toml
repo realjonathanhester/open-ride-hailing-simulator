@@ -1,0 +1,19 @@
+# Comparison A: Austin weekday 10k straight-line, pooling on.
+# Built-in pooling keeps unlimited detours; this file does not add a detour cap.
+# Pair with settings_pooling_off.toml. Fleet fractions, reassignment and
+# max_candidate_cars are set on the rhs-sweep command line (see README.md).
+[simulation]
+pooling_enabled = true
+reassignment_enabled = true
+max_request_to_assignment_seconds = 300
+max_request_to_pickup_seconds = 1200
+pickup_dwell_seconds = 30
+dropoff_dwell_seconds = 15
+default_num_requested_seats = 1
+default_num_available_seats = 4
+average_speed_meters_per_second = 8.0
+timezone = "America/Chicago"
+
+[hooks]
+matching = "greedy_nearest_eta"
+routing = "straight_line"

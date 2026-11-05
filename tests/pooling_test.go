@@ -86,3 +86,63 @@ func TestPartyOfFourCannotPool(t *testing.T) {
 	o := simulate(t, "pooling_enabled", "one_car_at_kezar_stadium", "simple_pool_second_rider_party_of_four")
 	assertEquals(t, o.trip("painted_ladies_to_union_square")["ridepool_type"], "d1p0d0")
 }
+
+// Case 31: once a rider is aboard, a closer car that comes online later does
+// not take the trip. Reassignment only considers StatusAssigned (not yet
+// arrived); StatusOnTrip is skipped. Contrast case 12, where the same second
+// car online before pickup steals the request.
+func TestAboardRiderIsNotReassignedWhenCloserCarAppears(t *testing.T) {
+	o := simulate(t, "pooling_enabled", "ferry_building_car_then_union_square_car_online_after_pickup", "single_trip")
+	trip := o.trip("kezar_stadium_to_coit_tower")
+	assertEquals(t, trip["status"], "completed")
+	assertEquals(t, trip["supply_id"], "car_at_ferry_building")
+	assertEquals(t, trip["reassign_count"], "0")
+	assertEquals(t, trip["first_assigned_at"], at(60))
+	assertEquals(t, trip["assigned_at"], at(60))
+	assertEquals(t, trip["pickup_at"], at(697))
+	assertEquals(t, trip["dropoff_at"], at(1291))
+	// The late car comes online after pickup and never serves this request.
+	for _, event := range o.events("car_at_union_square") {
+		if event["action"] == "plan_updated" || event["action"] == "pickup" {
+			t.Errorf("closer car online after pickup took action %s at %s; aboard rider must stay with the original car", event["action"], event["at"])
+		}
+	}
+}
+
+// Case 32: a two-seat car already at capacity (two one-seat pooled riders)
+// cannot take a third request; that request goes to another open car.
+func TestRequestDoesNotPoolOntoCarAtCapacity(t *testing.T) {
+	o := simulate(t, "pooling_enabled", "two_seat_car_at_kezar_and_four_seat_car_at_palace", "three_requests_from_kezar")
+	first := o.trip("kezar_stadium_to_painted_ladies")
+	second := o.trip("kezar_stadium_to_union_square")
+	third := o.trip("kezar_stadium_to_coit_tower")
+	assertEquals(t, first["status"], "completed")
+	assertEquals(t, second["status"], "completed")
+	assertEquals(t, third["status"], "completed")
+	assertEquals(t, first["supply_id"], "car_at_kezar_stadium")
+	assertEquals(t, second["supply_id"], "car_at_kezar_stadium")
+	assertEquals(t, third["supply_id"], "car_at_palace_of_fine_arts")
+	assertEquals(t, first["max_co_riders"], "1")
+	assertEquals(t, second["max_co_riders"], "1")
+	assertEquals(t, third["max_co_riders"], "0")
+	assertEquals(t, third["reassign_count"], "0")
+	for _, event := range o.events("car_at_kezar_stadium") {
+		seats := event["seats_in_use"]
+		if seats != "0" && seats != "1" && seats != "2" {
+			t.Errorf("seats_in_use = %s at %s, want at most 2 on the two-seat car", seats, event["at"])
+		}
+	}
+}
+
+// Case 16 characterization entry point (same fixtures and asserts as
+// TestSameInputsGiveIdenticalOutputs in simple_cases_test.go): two pooling
+// runs with identical settings and inputs are byte-identical.
+func TestPoolingSameInputsAreDeterministic(t *testing.T) {
+	first := simulate(t, "pooling_enabled", "one_car_at_kezar_stadium", "simple_pool")
+	second := simulate(t, "pooling_enabled", "one_car_at_kezar_stadium", "simple_pool")
+	assertFile(t, "trips", second.files[runner.TripsFile], first.files[runner.TripsFile])
+	assertFile(t, "supply event log", second.files[runner.SupplyEventsFile], first.files[runner.SupplyEventsFile])
+	assertFile(t, "supply summary", second.files[runner.SupplySummaryFile], first.files[runner.SupplySummaryFile])
+	assertFile(t, "run summary", second.runSummaryWithoutTimings(), first.runSummaryWithoutTimings())
+	assertFile(t, "run metadata", second.files[runner.RunMetadataFile], first.files[runner.RunMetadataFile])
+}

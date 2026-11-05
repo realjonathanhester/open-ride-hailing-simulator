@@ -1,0 +1,4 @@
+request_id,requested_at,origin_lat,origin_lng,destination_lat,destination_lng,num_requested_seats,max_request_to_assignment_seconds,max_request_to_pickup_seconds
+kezar_stadium_to_painted_ladies,1767225660,37.767263,-122.456743,37.776120,-122.432700,1,,
+kezar_stadium_to_union_square,1767225661,37.767263,-122.456743,37.787994,-122.407437,1,,
+kezar_stadium_to_coit_tower,1767225662,37.767263,-122.456743,37.802395,-122.405822,1,,

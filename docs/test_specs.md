@@ -132,6 +132,25 @@ Cases 1 and 4 are the **exhaustive output tests**: they assert every field of ev
 - **Fixtures:** `pooling_enabled.toml`, `one_car_at_kezar_stadium.csv`, `simple_pool_second_rider_party_of_four.csv`
 - **Assert:** `painted_ladies_to_union_square` has `ridepool_type = d1p0d0` (1 + 4 seats exceeds 4).
 
+### Pooling characterization (current built-in semantics)
+
+These cases pin today's pooling behavior. They change no matcher or simulator
+rules. Built-in pooling still has unlimited detours.
+
+### 31. `aboard_rider_is_not_reassigned_when_closer_car_appears`
+
+- **Purpose:** An in-progress rider (status `on_trip`) is never reassigned. Reassignment only reconsiders `assigned` requests that are not yet arrived-at.
+- **Fixtures:** `pooling_enabled.toml`, `ferry_building_car_then_union_square_car_online_after_pickup.csv` (Ferry Building car from T+0; Union Square car from T+700, after the Ferry Building pickup at T+697), `single_trip.csv`
+- **Assert:** `kezar_stadium_to_coit_tower` stays on `car_at_ferry_building` with `reassign_count = 0`, `assigned_at = T+60`, `pickup_at = T+697`, `dropoff_at = T+1291`. The Union Square car has no `plan_updated` or `pickup` for this request. Contrast case 12, where the same second car online at T+120 steals the request before pickup.
+
+### 32. `request_does_not_pool_onto_car_at_capacity`
+
+- **Purpose:** Seat limits block pooling onto a car that is already full.
+- **Fixtures:** `pooling_enabled.toml`, `two_seat_car_at_kezar_and_four_seat_car_at_palace.csv` (Kezar car has 2 seats; Palace of Fine Arts car has 4), `three_requests_from_kezar.csv` (three one-seat requests from Kezar a second apart)
+- **Assert:** the first two requests complete on `car_at_kezar_stadium` with `max_co_riders = 1`; the third completes on `car_at_palace_of_fine_arts` with `max_co_riders = 0`. `seats_in_use` on the Kezar car never exceeds 2.
+
+Same-input determinism for pooling is case 16 (`same_inputs_give_identical_outputs`); `TestPoolingSameInputsAreDeterministic` in `tests/pooling_test.go` calls that test so the characterization suite is easy to find.
+
 ### 7. `rider_cancels_when_no_car_is_online`
 
 - **Fixtures:** `short_assignment_timeout.toml`, `one_car_online_late_at_kezar_stadium.csv`, `single_trip.csv`

@@ -35,3 +35,11 @@ Experiment 1 over the seed folders:
 Reproduce the reference row in benchmarks/austin_weekday_10k/README.md (9983 completed, 17 canceled, median 118 s, p90 420 s, about 75 s):
 
     go run ./experiments/sweep/cmd/rhs-sweep -settings benchmarks/austin_weekday_10k/settings.toml -benchmarks benchmarks/austin_weekday_10k -fleet 1 -reassignment true -max-candidate-cars 0 -output out/reference
+
+## Comparison A example (pooling off versus on)
+
+Internal Austin weekday 10k straight-line example: pooling off versus pooling
+on, with `max_candidate_cars = 10`, `reassignment_enabled = true`, fleets 70%
+and 100%, and the three Experiment-1 seed folders. Settings files and the
+exact commands are in [examples/comparison_a/](examples/comparison_a/). Twelve
+runs (two settings × two fleets × three seeds); run them only after review.
