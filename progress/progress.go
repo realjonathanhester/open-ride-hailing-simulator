@@ -32,6 +32,7 @@ type Snapshot struct {
 	OSRMTable       int64 // /table HTTP requests
 	OSRMRoute       int64 // /route HTTP requests
 	OSRMCacheHits   int64 // pairs served without a new HTTP request
+	OSRMCacheMisses int64 // pairs that needed a new HTTP request
 }
 
 // Reporter writes Snapshots to a writer, redrawing in place on a terminal
@@ -171,6 +172,9 @@ func Format(snap Snapshot, elapsed time.Duration, location *time.Location) strin
 	if snap.OSRM {
 		fmt.Fprintf(&b, "  |  osrm %d table, %d route, %d cache hits",
 			snap.OSRMTable, snap.OSRMRoute, snap.OSRMCacheHits)
+		if lookups := snap.OSRMCacheHits + snap.OSRMCacheMisses; lookups > 0 {
+			fmt.Fprintf(&b, " (%.1f%% hit rate)", 100*float64(snap.OSRMCacheHits)/float64(lookups))
+		}
 	}
 	return b.String()
 }

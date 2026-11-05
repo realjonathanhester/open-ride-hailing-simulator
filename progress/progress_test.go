@@ -37,6 +37,12 @@ func TestFormatIncludesOsrmCountsWhenPresent(t *testing.T) {
 	assertContains(t, line, "T+100")
 }
 
+func TestFormatShowsOsrmCacheHitRate(t *testing.T) {
+	snap := Snapshot{OSRM: true, OSRMCacheHits: 30, OSRMCacheMisses: 10}
+	line := Format(snap, time.Second, nil)
+	assertContains(t, line, "30 cache hits (75.0% hit rate)")
+}
+
 func TestNonTerminalReporterWritesPlainLines(t *testing.T) {
 	var buf bytes.Buffer
 	reporter := &Reporter{Writer: &buf, Terminal: false, Interval: time.Nanosecond}
