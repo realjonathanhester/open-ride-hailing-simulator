@@ -89,6 +89,7 @@ Scenario CSVs may carry extra columns; the CSV reader looks columns up by header
 | Name | Source | Status |
 |---|---|---|
 | [`austin_weekday_10k`](../benchmarks/austin_weekday_10k/README.md) | RideAustin, Oct 2016–Apr 2017 weekdays; 10,000 requests, 3,377 shifts | Available |
+| [`austin_weekday_100`](../benchmarks/austin_weekday_100/README.md) | Cut from `austin_weekday_10k`: 100 requests drawn with seed 20161001 from 18:30–19:00 local time (the busiest 30 minutes); car shifts online from 18:15 to 19:00 kept with probability 100 / requests in window (143 shifts), clipped to 18:15–20:00 | Available |
 | `sf_cabspotting_*` | CRAWDAD epfl/mobility, ~536 SF cabs, May–Jun 2008, CC BY | Planned |
 | `nyc_manhattan_week` | NYC TLC trip records / FleetPy Manhattan week (Zenodo 15187906) | Planned |
 | `chicago_tnp_week` | Chicago TNP trips / FleetPy June 2022 week (Zenodo 15189440) | Planned |
