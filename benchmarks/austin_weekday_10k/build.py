@@ -54,8 +54,9 @@ def shifts(d):
 
 def main():
     p = argparse.ArgumentParser(); p.add_argument("--raw", required=True); p.add_argument("--out", required=True)
+    p.add_argument("--seed", type=int, default=SEED, help="resample seed; the shipped benchmark uses %d" % SEED)
     args = p.parse_args()
-    rng = np.random.default_rng(SEED)
+    rng = np.random.default_rng(args.seed)
     d = shifts(load(args.raw))           # shifts are chained on the full timeline (cross midnight)
     d["date"] = d.req.dt.strftime("%Y-%m-%d")
     hol = {str(x.date()) for x in USFederalHolidayCalendar().holidays("2016-01-01", "2017-12-31")}
@@ -131,7 +132,7 @@ def main():
     real_day = pool.groupby("date").agg(trips=("RIDE_ID", "size"), shifts=("shift_id", "nunique"))
     hr = (s.tod // 3600)
     stats = {
-        "seed": SEED, "pool_weekdays": int(n_days), "pool_trips": int(len(pool)),
+        "seed": args.seed, "pool_weekdays": int(n_days), "pool_trips": int(len(pool)),
         "avg_weekday_trips": float(real_day.trips.mean()), "avg_weekday_shifts": float(real_day.shifts.mean()),
         "scale_vs_avg_weekday": N_TRIPS / float(real_day.trips.mean()),
         "requests": int(len(req)), "supply": int(len(sup)), "unique_source_drivers": int(sup.source_driver_id.nunique()),
@@ -167,7 +168,7 @@ def main():
     ax2.set_ylabel("Concurrent count"); ax2.set_ylim(0, max(prof.on.max(), prof.act.max()) * 1.15)
     h1, l1 = ax.get_legend_handles_labels(); h2, l2 = ax2.get_legend_handles_labels()
     ax.legend(h1 + h2, l1 + l2, loc="upper left", fontsize=8)
-    ax.set_xticks(range(24)); ax.set_title(f"austin_weekday_10k: {len(req):,} requests, {len(sup):,} car shifts (RideAustin weekdays, seed {SEED})")
+    ax.set_xticks(range(24)); ax.set_title(f"austin_weekday_10k: {len(req):,} requests, {len(sup):,} car shifts (RideAustin weekdays, seed {args.seed})")
     fig.tight_layout(); fig.savefig(os.path.join(args.out, "profile.png"), dpi=130)
     print(json.dumps(stats, indent=1, default=str))
 
