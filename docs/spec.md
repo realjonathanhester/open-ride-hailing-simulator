@@ -245,6 +245,10 @@ Plugins must be deterministic: the same inputs give the same answers, with no wa
 - **Accounting.** Repositioning time and distance count as idle (`idle_seconds`, `idle_meters`) and as deadhead. Reposition arrivals are internal events, so they never call the matcher, and they keep the run going. `simulation_end_at` includes a final return trip.
 - **Router errors.** If the router can't route the reposition, the car logs `reposition_rejected` and stays idle.
 
+### Registering external hooks
+
+Hooks are chosen by name from a registry in `runner`. An external package can call `runner.RegisterMatcher`, `runner.RegisterRouter` or `runner.RegisterDriverBehavior` with a name and a constructor (usually in `init`), and then select it by that name in `[hooks]`, so it doesn't need to fork the core. The built-in hooks register themselves the same way. Registering a name that is already taken returns `<kind> "<name>" is already registered`. A name that isn't registered fails the run with `unknown <kind> "<name>"`.
+
 ## Simulation loop
 
 1. **Initialize.** Load the settings and inputs, filling in defaults. The clock starts at the first `requested_at`. Supply with `online_at` before that is online and idle at (`online_lat`, `online_lng`).

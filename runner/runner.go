@@ -8,13 +8,10 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/realjonathanhester/ride-hailing-simulator/driverbehavior"
-	"github.com/realjonathanhester/ride-hailing-simulator/matching"
 	"github.com/realjonathanhester/ride-hailing-simulator/model"
 	"github.com/realjonathanhester/ride-hailing-simulator/plugins/csvio"
 	"github.com/realjonathanhester/ride-hailing-simulator/plugins/tomlsettings"
 	"github.com/realjonathanhester/ride-hailing-simulator/progress"
-	"github.com/realjonathanhester/ride-hailing-simulator/routing"
 	"github.com/realjonathanhester/ride-hailing-simulator/routing/osrm"
 	"github.com/realjonathanhester/ride-hailing-simulator/simulator"
 )
@@ -47,37 +44,6 @@ type ProgressOptions struct {
 	Writer   io.Writer // defaults to os.Stderr
 	Terminal bool      // redraw in place when true
 	Interval time.Duration
-}
-
-// NewMatcher returns a matching hook by name.
-func NewMatcher(name string) (model.Matcher, error) {
-	switch name {
-	case "greedy_nearest_eta", "reference_test_matcher":
-		return matching.NewGreedy(), nil
-	}
-	return nil, fmt.Errorf("unknown matching hook %q", name)
-}
-
-// NewDriverBehavior returns a driver behavior plugin by name; empty is simple.
-func NewDriverBehavior(name string) (model.DriverBehavior, error) {
-	switch name {
-	case "", driverbehavior.SimpleName:
-		return driverbehavior.Simple{}, nil
-	case driverbehavior.ReturnToOriginName:
-		return driverbehavior.ReturnToOrigin{}, nil
-	}
-	return nil, fmt.Errorf("unknown driver behavior plugin %q", name)
-}
-
-// NewRouter returns a routing hook by name.
-func NewRouter(name string, settings model.Settings) (model.Router, error) {
-	switch name {
-	case "straight_line":
-		return routing.NewStraightLine(settings.AverageSpeedMetersPerSecond)
-	case "osrm":
-		return newOSRM(settings.OSRM)
-	}
-	return nil, fmt.Errorf("unknown routing hook %q", name)
 }
 
 // newOSRM builds the OSRM router. Dataset fields set directly in [osrm]
