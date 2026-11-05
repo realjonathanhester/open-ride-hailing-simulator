@@ -9,11 +9,12 @@ package main
 import (
 	"flag"
 	"fmt"
+	"net/http"
 	"os"
 
+	"github.com/realjonathanhester/ride-hailing-simulator/progress"
 	"github.com/realjonathanhester/ride-hailing-simulator/runner"
 	"github.com/realjonathanhester/ride-hailing-simulator/viewer"
-	"net/http"
 )
 
 func main() {
@@ -36,12 +37,20 @@ func run(args []string) int {
 	requests := flags.String("requests", "", "ride requests CSV (overrides [io] requests_path)")
 	supply := flags.String("supply", "", "supply CSV (overrides [io] supply_path)")
 	output := flags.String("output", "", "output directory (overrides [io] output_directory)")
+	showProgress := flags.Bool("progress", true, "print a live status line on stderr while the simulation runs")
 	flags.Parse(args)
 	if *settings == "" {
 		flags.Usage()
 		return 2
 	}
-	if _, err := runner.RunFiles(*settings, runner.Paths{Requests: *requests, Supply: *supply, OutputDirectory: *output}); err != nil {
+	options := runner.Options{}
+	if *showProgress {
+		options.Progress = &runner.ProgressOptions{
+			Writer:   os.Stderr,
+			Terminal: progress.IsTerminal(os.Stderr),
+		}
+	}
+	if _, err := runner.RunWithOptions(*settings, runner.Paths{Requests: *requests, Supply: *supply, OutputDirectory: *output}, options); err != nil {
 		fmt.Fprintln(os.Stderr, "rhs:", err)
 		return 1
 	}

@@ -347,10 +347,23 @@ Two runs are **paired** when `requests_sha256` and `supply_sha256` match. A diff
 ## Command line
 
 ```sh
-rhs run -settings settings.toml -supply supply.csv -requests requests.csv -output out/
+rhs run -settings settings.toml -supply supply.csv -requests requests.csv -output out/ [-progress=false]
 ```
 
 Flags override the paths in the settings file's `[io]` section. Calling `rhs` with flags and no subcommand still means `run`. The output viewer (`rhs view`) is specified in [tooling_spec.md](tooling_spec.md).
+
+### Live progress
+
+While a run is in progress, `rhs run` prints a status line on stderr:
+
+- A percent bar from simulated time versus the scenario horizon (the latest `requested_at`, `online_at` or `offline_at` in the inputs). After the horizon the bar stays at 100% while remaining trips finish.
+- Elapsed wall time and an estimate of time remaining.
+- The simulated clock as `T+N` plus local wall-clock time when `[simulation] timezone` is set, matching the viewer.
+- Drivers online, split into idle, en route, on trip and repositioning.
+- Requests waiting, assigned (including driver arrived and on trip), completed and canceled.
+- When the OSRM router is in use: `/table` requests, `/route` requests and cache hits (pairs served without a new HTTP request).
+
+On a terminal the line redraws in place about four times a second. When stderr is not a terminal, a plain line is printed every few seconds instead. `-progress=false` turns the status line off. Progress is display only: it does not change outputs, hashes or determinism.
 
 ## Worked example
 
@@ -388,3 +401,4 @@ _Pooling on_
 10. **Reproducibility.** Coordinates are rounded to 1e-5 degrees, the map's SHA-256 and OSRM version go into `run_metadata`, and an optional cache file replays a run without a server.
 11. **Austin first.** The road extract is the Geofabrik Texas file cropped to the Austin metro box `-98.20,29.90,-97.33,30.82` (every point in the Austin weekday benchmark plus about 10 km of margin).
 12. **Candidate pruning by straight-line distance.** With OSRM, every matching decision priced every online car, so a full Austin run took over 26 minutes against 75 s on straight lines. `[matching] max_candidate_cars` keeps the N nearest cars by haversine distance before any router call. Haversine is free and ranks cars close to road time in a city, though a car across a river can be pruned even when its road time ties or beats a kept car's. Open and busy cars get separate limits of N each, so a nearby busy car never crowds out every idle car or the other way round. One setting serves both sets because a second knob had no observed use. The default stays 0 (no pruning) so every existing output is byte-identical.
+13. **Live progress on stderr.** Status is a display concern, so it writes only to stderr and is on by default. The horizon for the percent bar is the latest input timestamp, which is known up front and stays fixed for the run; finishing work after that shows 100%. A terminal gets an in-place redraw so logs stay readable; pipes and files get plain lines. `-progress=false` keeps batch jobs and tests quiet.

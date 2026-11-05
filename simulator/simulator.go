@@ -121,6 +121,12 @@ type Simulator struct {
 	matcherCalls   map[string]int
 	matcherElapsed time.Duration
 	routerElapsed  time.Duration
+
+	// Progress reporting (display only; never affects results).
+	progress       func(Progress)
+	progressEvery  time.Duration
+	lastProgressAt time.Time
+	horizonAt      int64
 }
 
 // New creates a simulator with the given hooks.
@@ -133,6 +139,88 @@ func New(settings model.Settings, router model.Router, matcher model.Matcher) *S
 // SetDriverBehavior replaces the default simple driver behavior.
 func (s *Simulator) SetDriverBehavior(behavior model.DriverBehavior) {
 	s.behavior = behavior
+}
+
+// Progress is a read-only snapshot of a running simulation for display.
+// Building one never changes simulation state.
+type Progress struct {
+	Now       int64
+	StartAt   int64
+	HorizonAt int64
+
+	DriversOnline        int
+	DriversIdle          int
+	DriversEnRoute       int
+	DriversOnTrip        int
+	DriversRepositioning int
+
+	RequestsWaiting   int
+	RequestsAssigned  int
+	RequestsCompleted int
+	RequestsCanceled  int
+	RequestsTotal     int
+}
+
+// SetProgress asks the simulator to call fn about every interval of wall
+// time while Run executes. A nil fn turns reporting off. The callback must
+// not call back into the simulator. Interval values at or below zero mean
+// 250 milliseconds.
+func (s *Simulator) SetProgress(fn func(Progress), interval time.Duration) {
+	s.progress = fn
+	if interval <= 0 {
+		interval = 250 * time.Millisecond
+	}
+	s.progressEvery = interval
+}
+
+func (s *Simulator) snapshot() Progress {
+	p := Progress{Now: s.now, StartAt: s.startAt, HorizonAt: s.horizonAt, RequestsTotal: len(s.requests)}
+	for _, id := range s.carOrder {
+		c := s.cars[id]
+		if !c.online || c.offline {
+			continue
+		}
+		p.DriversOnline++
+		switch c.state() {
+		case model.StateIdle:
+			p.DriversIdle++
+		case model.StateEnRoute:
+			p.DriversEnRoute++
+		case model.StateOnTrip:
+			p.DriversOnTrip++
+		case model.StateRepositioning:
+			p.DriversRepositioning++
+		}
+	}
+	for _, id := range s.requestOrder {
+		r := s.requests[id]
+		if !r.arrived {
+			continue
+		}
+		switch r.status {
+		case model.StatusRequested:
+			p.RequestsWaiting++
+		case model.StatusAssigned, model.StatusDriverArrived, model.StatusOnTrip:
+			p.RequestsAssigned++
+		case model.StatusCompleted:
+			p.RequestsCompleted++
+		case model.StatusCanceled:
+			p.RequestsCanceled++
+		}
+	}
+	return p
+}
+
+func (s *Simulator) reportProgress(force bool) {
+	if s.progress == nil {
+		return
+	}
+	now := time.Now()
+	if !force && !s.lastProgressAt.IsZero() && now.Sub(s.lastProgressAt) < s.progressEvery {
+		return
+	}
+	s.lastProgressAt = now
+	s.progress(s.snapshot())
 }
 
 func validate(settings model.Settings, requests []model.Request, supplies []model.Supply) error {
@@ -219,6 +307,19 @@ func (s *Simulator) Run(requests []model.Request, supplies []model.Supply) (*Res
 		}
 	}
 	sort.Strings(s.carOrder)
+	s.horizonAt = s.startAt
+	for _, in := range requests {
+		if in.RequestedAt > s.horizonAt {
+			s.horizonAt = in.RequestedAt
+		}
+	}
+	for _, in := range supplies {
+		if in.OfflineAt != nil && *in.OfflineAt > s.horizonAt {
+			s.horizonAt = *in.OfflineAt
+		} else if in.OnlineAt > s.horizonAt {
+			s.horizonAt = in.OnlineAt
+		}
+	}
 	if interval := s.settings.BatchMatchingIntervalSeconds; interval != nil {
 		s.push(&event{at: s.startAt + *interval, priority: priorityBatchTick, id: "batch_tick", kind: eventBatchTick})
 	}
@@ -238,7 +339,9 @@ func (s *Simulator) Run(requests []model.Request, supplies []model.Supply) (*Res
 			s.endAt = e.at
 		}
 		s.apply(e)
+		s.reportProgress(false)
 	}
+	s.reportProgress(true)
 	for _, id := range s.carOrder {
 		if c := s.cars[id]; c.online && !c.offline {
 			s.now = s.endAt

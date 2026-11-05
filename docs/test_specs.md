@@ -249,3 +249,17 @@ Component tests call the `greedy_nearest_eta` matcher directly with a fake route
 
 - **Fixtures:** `base_default.toml` and `no_candidate_limit.toml`, each with `ferry_building_car_then_union_square_car_online_late.csv` and `single_trip.csv`
 - **Assert:** both runs produce byte-identical trips, supply event log, supply summary, run summary (excluding timings) and run metadata, including `settings_sha256`
+
+### Live progress
+
+Cases in `tests/progress_test.go`. Progress is also covered by package tests in `progress/`.
+
+### 29. `progress_does_not_change_outputs`
+
+- **Fixtures:** `base_default.toml`, `one_car_at_union_square.csv`, `single_trip.csv`
+- **Assert:** a run with live progress writing to a buffer produces byte-identical trips, supply event log, supply summary, run summary (excluding timings) and run metadata compared with a run that has progress off; the buffer contains driver and request counts
+
+### 30. `progress_line_reports_completed_trip`
+
+- **Fixtures:** `base_default.toml`, `one_car_at_kezar_stadium.csv`, `single_trip.csv`
+- **Assert:** the final progress line includes a percent, a `T+` clock and `1 completed`
