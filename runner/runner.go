@@ -6,12 +6,14 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/realjonathanhester/ride-hailing-simulator/driverbehavior"
 	"github.com/realjonathanhester/ride-hailing-simulator/matching"
 	"github.com/realjonathanhester/ride-hailing-simulator/model"
 	"github.com/realjonathanhester/ride-hailing-simulator/plugins/csvio"
 	"github.com/realjonathanhester/ride-hailing-simulator/plugins/tomlsettings"
+	"github.com/realjonathanhester/ride-hailing-simulator/progress"
 	"github.com/realjonathanhester/ride-hailing-simulator/routing"
 	"github.com/realjonathanhester/ride-hailing-simulator/routing/osrm"
 	"github.com/realjonathanhester/ride-hailing-simulator/simulator"
@@ -31,6 +33,20 @@ type Paths struct {
 	Requests        string
 	Supply          string
 	OutputDirectory string
+}
+
+// Options controls optional run behavior that never changes simulation
+// outputs, such as the live progress line on stderr.
+type Options struct {
+	// Progress enables the live status line. When nil, progress is off.
+	Progress *ProgressOptions
+}
+
+// ProgressOptions configures the live status line.
+type ProgressOptions struct {
+	Writer   io.Writer // defaults to os.Stderr
+	Terminal bool      // redraw in place when true
+	Interval time.Duration
 }
 
 // NewMatcher returns a matching hook by name.
@@ -84,7 +100,13 @@ func newOSRM(rs model.OSRMSettings) (model.Router, error) {
 }
 
 // RunFiles reads a TOML settings file, runs the simulation and writes outputs.
+// Progress is off; use RunWithOptions to enable the live status line.
 func RunFiles(settingsPath string, paths Paths) (*simulator.Result, error) {
+	return RunWithOptions(settingsPath, paths, Options{})
+}
+
+// RunWithOptions is RunFiles with optional live progress on a writer.
+func RunWithOptions(settingsPath string, paths Paths, options Options) (*simulator.Result, error) {
 	settings, err := tomlsettings.Reader{Path: settingsPath}.ReadSettings()
 	if err != nil {
 		return nil, err
@@ -128,11 +150,49 @@ func RunFiles(settingsPath string, paths Paths) (*simulator.Result, error) {
 	}
 	sim := simulator.New(settings, router, matcher)
 	sim.SetDriverBehavior(behavior)
+
+	var reporter *progress.Reporter
+	if options.Progress != nil {
+		writer := options.Progress.Writer
+		if writer == nil {
+			writer = os.Stderr
+		}
+		var location *time.Location
+		if settings.Timezone != "" {
+			location, err = time.LoadLocation(settings.Timezone)
+			if err != nil {
+				return nil, fmt.Errorf("timezone %q: %w", settings.Timezone, err)
+			}
+		}
+		interval := options.Progress.Interval
+		if interval <= 0 {
+			if options.Progress.Terminal {
+				interval = 250 * time.Millisecond
+			} else {
+				interval = 2 * time.Second
+			}
+		}
+		// The simulator throttles callbacks; the reporter writes every one.
+		reporter = &progress.Reporter{
+			Writer:   writer,
+			Terminal: options.Progress.Terminal,
+			Location: location,
+			Interval: time.Nanosecond,
+		}
+		osrmStats, _ := router.(osrmCounter)
+		sim.SetProgress(func(p simulator.Progress) {
+			reporter.Update(toSnapshot(p, osrmStats))
+		}, interval)
+	}
+
 	result, err := sim.Run(requests, supplies)
 	if err != nil {
 		return nil, err
 	}
-	if counter, ok := router.(interface{ RequestCounts() (int64, int64) }); ok {
+	if reporter != nil {
+		reporter.Finish()
+	}
+	if counter, ok := router.(interface{ RequestCounts() (int64, int64) }); ok && options.Progress == nil {
 		table, route := counter.RequestCounts()
 		fmt.Fprintf(os.Stderr, "osrm: %d table requests, %d route requests\n", table, route)
 	}
@@ -156,6 +216,29 @@ func RunFiles(settingsPath string, paths Paths) (*simulator.Result, error) {
 		}
 	}
 	return result, nil
+}
+
+type osrmCounter interface {
+	RequestCounts() (table, route int64)
+	CacheHits() int64
+}
+
+func toSnapshot(p simulator.Progress, counter osrmCounter) progress.Snapshot {
+	snap := progress.Snapshot{
+		Now: p.Now, StartAt: p.StartAt, HorizonAt: p.HorizonAt,
+		DriversOnline: p.DriversOnline, DriversIdle: p.DriversIdle,
+		DriversEnRoute: p.DriversEnRoute, DriversOnTrip: p.DriversOnTrip,
+		DriversRepositioning: p.DriversRepositioning,
+		RequestsWaiting: p.RequestsWaiting, RequestsAssigned: p.RequestsAssigned,
+		RequestsCompleted: p.RequestsCompleted, RequestsCanceled: p.RequestsCanceled,
+		RequestsTotal: p.RequestsTotal,
+	}
+	if counter != nil {
+		snap.OSRM = true
+		snap.OSRMTable, snap.OSRMRoute = counter.RequestCounts()
+		snap.OSRMCacheHits = counter.CacheHits()
+	}
+	return snap
 }
 
 func write(w model.OutputWriter, columns []string, rows [][]string) error {

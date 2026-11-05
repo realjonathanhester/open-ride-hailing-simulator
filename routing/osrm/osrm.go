@@ -87,6 +87,9 @@ type Router struct {
 	cacheOut   *bufio.Writer
 	// tableRequests and routeRequests count HTTP requests sent to OSRM.
 	tableRequests, routeRequests atomic.Int64
+	// cacheHits counts pairs served from memory or the cache file without a
+	// new HTTP request (costs already known, or a geometry already loaded).
+	cacheHits atomic.Int64
 }
 
 func round5(v float64) int64 { return int64(math.Round(v * 1e5)) }
@@ -294,10 +297,12 @@ func (r *Router) Prefetch(sources, destinations []model.Location, departAt int64
 func (r *Router) ensureCosts(pairs []pair, target map[pair]cost) error {
 	r.mu.Lock()
 	missing := map[pair]bool{}
+	hits := int64(0)
 	for _, p := range pairs {
 		_, known := r.costs[p]
 		_, fetched := target[p]
 		if known || fetched {
+			hits++
 			continue
 		}
 		if p.from == p.to {
@@ -307,6 +312,9 @@ func (r *Router) ensureCosts(pairs []pair, target map[pair]cost) error {
 		missing[p] = true
 	}
 	r.mu.Unlock()
+	if hits > 0 {
+		r.cacheHits.Add(hits)
+	}
 	if len(missing) == 0 {
 		return nil
 	}
@@ -362,6 +370,12 @@ func sortedPoints(set map[point]bool) []point {
 // sent to the OSRM server so far. Cache hits send none.
 func (r *Router) RequestCounts() (table, route int64) {
 	return r.tableRequests.Load(), r.routeRequests.Load()
+}
+
+// CacheHits returns how many pairs were served from memory or the cache
+// file without a new HTTP request.
+func (r *Router) CacheHits() int64 {
+	return r.cacheHits.Load()
 }
 
 func (r *Router) get(path string, out any) error {
@@ -449,6 +463,7 @@ func (r *Router) geometry(p pair) ([]model.Location, error) {
 	shape, ok := r.geometries[p]
 	r.mu.Unlock()
 	if ok {
+		r.cacheHits.Add(1)
 		return shape, nil
 	}
 	if r.offline {
