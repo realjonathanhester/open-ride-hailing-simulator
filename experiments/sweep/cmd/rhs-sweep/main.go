@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/realjonathanhester/ride-hailing-simulator/experiments/sweep"
+	_ "github.com/realjonathanhester/ride-hailing-simulator/experiments/transfermatcher"
 )
 
 func main() {

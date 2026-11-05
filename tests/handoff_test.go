@@ -183,7 +183,6 @@ func TestCancelOnwardPreservesAboardRiderDropoff(t *testing.T) {
 	}
 }
 
-
 // Case 45: after a handoff dropoff, the original max_request_to_pickup deadline
 // must not cancel the rider; only max_handoff_wait_seconds governs.
 func TestOriginalPickupDeadlineDoesNotCancelAfterHandoff(t *testing.T) {

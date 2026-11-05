@@ -31,7 +31,10 @@ type file struct {
 		Routing        string `toml:"routing"`
 	} `toml:"hooks"`
 	Matching struct {
-		MaxCandidateCars *int `toml:"max_candidate_cars"`
+		MaxCandidateCars        *int     `toml:"max_candidate_cars"`
+		MaxRiderPathRatio       *float64 `toml:"max_rider_path_ratio"`
+		MaxInsertionEvaluations *int     `toml:"max_insertion_evaluations"`
+		TransfersEnabled        *bool    `toml:"transfers_enabled"`
 	} `toml:"matching"`
 	OSRM struct {
 		URL                 string `toml:"url"`
@@ -99,6 +102,21 @@ func (r Reader) ReadSettings() (model.Settings, error) {
 			return model.Settings{}, fmt.Errorf("%s: [matching] max_candidate_cars must be 0 (no limit) or more, got %d", r.Path, *limit)
 		}
 		out.MaxCandidateCars = *limit
+	}
+	if ratio := f.Matching.MaxRiderPathRatio; ratio != nil {
+		if *ratio <= 0 {
+			return model.Settings{}, fmt.Errorf("%s: [matching] max_rider_path_ratio must be positive, got %v", r.Path, *ratio)
+		}
+		out.MaxRiderPathRatio = *ratio
+	}
+	if budget := f.Matching.MaxInsertionEvaluations; budget != nil {
+		if *budget <= 0 {
+			return model.Settings{}, fmt.Errorf("%s: [matching] max_insertion_evaluations must be positive, got %d", r.Path, *budget)
+		}
+		out.MaxInsertionEvaluations = *budget
+	}
+	if f.Matching.TransfersEnabled != nil {
+		out.TransfersEnabled = f.Matching.TransfersEnabled
 	}
 	if s.PoolingEnabled != nil {
 		out.PoolingEnabled = *s.PoolingEnabled

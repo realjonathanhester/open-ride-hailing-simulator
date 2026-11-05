@@ -36,7 +36,7 @@ func (s *Simulator) match(trigger string) {
 		}
 		view := model.RequestView{RequestID: id, RequestedAt: r.input.RequestedAt, Origin: r.input.Origin, Destination: r.input.Destination,
 			NumRequestedSeats: r.seats, Status: r.status, SupplyID: r.supplyID, AssignedAt: r.assignedAt, CancelAt: r.cancelAt(),
-			HandoffLocation: r.handoffLocation}
+			HandoffLocation: r.handoffLocation, RealizedAboardDistanceMeters: realizedAboardDistance(r)}
 		input.Requests = append(input.Requests, view)
 	}
 	began := time.Now()
@@ -554,4 +554,16 @@ func addsPickup(c *car, plan []model.Stop) bool {
 		}
 	}
 	return false
+}
+
+// realizedAboardDistance sums completed trip-leg distances for the matcher.
+func realizedAboardDistance(r *request) int64 {
+	var total int64
+	for _, leg := range r.legs {
+		if leg.dropoffAt == nil {
+			continue // in-progress leg has no final distance yet
+		}
+		total += leg.distanceMeters
+	}
+	return total
 }
