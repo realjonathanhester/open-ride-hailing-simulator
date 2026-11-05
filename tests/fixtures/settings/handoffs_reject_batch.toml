@@ -1,0 +1,15 @@
+[simulation]
+max_request_to_assignment_seconds = 120
+pooling_enabled = false
+reassignment_enabled = true
+handoffs_enabled = true
+batch_matching_interval_seconds = 10
+pickup_dwell_seconds = 0
+dropoff_dwell_seconds = 0
+default_num_requested_seats = 1
+default_num_available_seats = 4
+average_speed_meters_per_second = 10.0
+
+[hooks]
+matching = "reject_second_car_matcher"
+routing = "straight_line"

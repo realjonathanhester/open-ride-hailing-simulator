@@ -1,0 +1,15 @@
+[simulation]
+pooling_enabled = false
+reassignment_enabled = true
+handoffs_enabled = true
+max_handoff_wait_seconds = 900
+batch_matching_interval_seconds = 10
+pickup_dwell_seconds = 0
+dropoff_dwell_seconds = 0
+default_num_requested_seats = 1
+default_num_available_seats = 4
+average_speed_meters_per_second = 10.0
+
+[hooks]
+matching = "handoff_then_greedy_matcher"
+routing = "straight_line"

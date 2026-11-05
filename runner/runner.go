@@ -19,6 +19,7 @@ import (
 // Output file names written to the output directory.
 const (
 	TripsFile         = "trips.csv"
+	TripLegsFile      = "trip_legs.csv"
 	SupplyEventsFile  = "supply_event_log.csv"
 	SupplySummaryFile = "supply_summary.csv"
 	RunSummaryFile    = "run_summary.csv"
@@ -170,11 +171,18 @@ func RunWithOptions(settingsPath string, paths Paths, options Options) (*simulat
 		columns []string
 		rows    [][]string
 	}{
-		{TripsFile, simulator.TripColumns, result.Trips},
+		{TripsFile, simulator.TripColumnsFor(settings), result.Trips},
 		{SupplyEventsFile, simulator.SupplyEventColumns, result.SupplyEvents},
 		{SupplySummaryFile, simulator.SupplySummaryColumns, result.SupplySummary},
-		{RunSummaryFile, simulator.RunSummaryColumns, result.RunSummary},
+		{RunSummaryFile, simulator.RunSummaryColumnsFor(settings), result.RunSummary},
 		{RunMetadataFile, simulator.RunMetadataColumnsFor(settings), result.RunMetadata},
+	}
+	if settings.HandoffsEnabled {
+		outputs = append(outputs, struct {
+			name    string
+			columns []string
+			rows    [][]string
+		}{TripLegsFile, simulator.TripLegColumns, result.TripLegs})
 	}
 	for _, o := range outputs {
 		if err := write(&csvio.Writer{Path: filepath.Join(settings.IO.OutputDirectory, o.name)}, o.columns, o.rows); err != nil {

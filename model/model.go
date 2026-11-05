@@ -32,6 +32,15 @@ type Settings struct {
 	// left out of the settings JSON then so existing settings hashes don't
 	// change.
 	MaxCandidateCars int `json:"max_candidate_cars,omitempty"`
+	// HandoffsEnabled turns on generic mid-trip handoff primitives: optional
+	// stop locations, waiting_for_handoff, batch validation and trip_legs
+	// output. False (the default) is left out of the settings JSON so existing
+	// settings hashes stay the same.
+	HandoffsEnabled bool `json:"handoffs_enabled,omitempty"`
+	// MaxHandoffWaitSeconds is an optional deadline from each handoff dropoff
+	// until the next actual pickup (covering waiting_for_handoff and the
+	// assigned / driver_arrived onward states). Nil means off.
+	MaxHandoffWaitSeconds *int64 `json:"max_handoff_wait_seconds,omitempty"`
 	// Timezone is an optional IANA zone name for showing simulated times as
 	// local wall-clock times. It never affects the simulation; it is left out
 	// of the settings JSON when empty so existing settings hashes don't change.
@@ -145,9 +154,38 @@ const (
 )
 
 // Stop is what the matcher sends: an ordered stop with no route data.
+// Location is optional. When nil, the simulator resolves pickup to the
+// request origin and dropoff to the destination (byte-identical to runs
+// that never set it). An explicit dropoff location that differs from the
+// destination is a handoff; an explicit pickup of a waiting_for_handoff
+// rider must match that rider's current handoff location.
 type Stop struct {
-	RequestID string   `json:"request_id"`
-	Type      StopType `json:"type"`
+	RequestID string    `json:"request_id"`
+	Type      StopType  `json:"type"`
+	Location  *Location `json:"location,omitempty"`
+}
+
+// StopKey is the identity of a stop in a plan: request and type, ignoring
+// any explicit location override.
+func StopKey(s Stop) Stop {
+	return Stop{RequestID: s.RequestID, Type: s.Type}
+}
+
+// SameStop reports whether two matcher stops are equal, comparing location
+// by value when set.
+func SameStop(a, b Stop) bool {
+	if a.RequestID != b.RequestID || a.Type != b.Type {
+		return false
+	}
+	return SameLocation(a.Location, b.Location)
+}
+
+// SameLocation compares optional locations by value.
+func SameLocation(a, b *Location) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
 }
 
 // Waypoint is a stop in a supply's current plan, with its ETA.
@@ -180,6 +218,9 @@ type RequestView struct {
 	SupplyID          string
 	AssignedAt        *int64
 	CancelAt          *int64
+	// HandoffLocation is set when status is waiting_for_handoff: the place
+	// the rider was dropped and must be picked up again.
+	HandoffLocation *Location
 }
 
 // MatchInput is everything the matcher sees on one call.
@@ -216,9 +257,10 @@ const (
 	StatusRequested     = "requested"
 	StatusAssigned      = "assigned"
 	StatusDriverArrived = "driver_arrived"
-	StatusOnTrip        = "on_trip"
-	StatusCompleted     = "completed"
-	StatusCanceled      = "canceled"
+	StatusOnTrip            = "on_trip"
+	StatusWaitingForHandoff = "waiting_for_handoff"
+	StatusCompleted         = "completed"
+	StatusCanceled          = "canceled"
 )
 
 // Supply states.

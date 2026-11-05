@@ -61,6 +61,17 @@ type request struct {
 	ridepoolType          string
 	assignmentDeadline    *int64
 	pickupDeadline        *int64
+
+	// Handoff state. handoffLocation is set after a handoff dropoff and cleared
+	// on the next actual pickup (or on cancel). handoffDeadline covers waiting
+	// and the assigned / driver_arrived onward states until that pickup.
+	handoffLocation         *model.Location
+	handoffDroppedAt        *int64
+	handoffDeadline         *int64
+	handoffCount            int
+	totalHandoffWaitSeconds int64
+	legs                    []tripLeg
+	legOdometerAtPickup     int64
 }
 
 type car struct {
@@ -127,6 +138,7 @@ type Simulator struct {
 	progressEvery  time.Duration
 	lastProgressAt time.Time
 	horizonAt      int64
+
 }
 
 // New creates a simulator with the given hooks.
@@ -198,7 +210,7 @@ func (s *Simulator) snapshot() Progress {
 			continue
 		}
 		switch r.status {
-		case model.StatusRequested:
+		case model.StatusRequested, model.StatusWaitingForHandoff:
 			p.RequestsWaiting++
 		case model.StatusAssigned, model.StatusDriverArrived, model.StatusOnTrip:
 			p.RequestsAssigned++
@@ -360,8 +372,21 @@ func (s *Simulator) isLive(e *event) bool {
 	case eventAssignmentDeadline:
 		return s.requests[e.id].status == model.StatusRequested || s.requests[e.id].status == model.StatusAssigned || s.requests[e.id].status == model.StatusDriverArrived
 	case eventPickupDeadline:
-		st := s.requests[e.id].status
+		r := s.requests[e.id]
+		// After a handoff dropoff, only max_handoff_wait_seconds governs; the
+		// original request-to-pickup deadline must not cancel later legs.
+		if r.handoffLocation != nil {
+			return false
+		}
+		st := r.status
 		return st == model.StatusRequested || st == model.StatusAssigned || st == model.StatusDriverArrived
+	case eventHandoffDeadline:
+		r := s.requests[e.id]
+		if r.handoffDeadline == nil || *r.handoffDeadline != e.at {
+			return false
+		}
+		st := r.status
+		return st == model.StatusWaitingForHandoff || st == model.StatusAssigned || st == model.StatusDriverArrived
 	case eventSupplyOffline:
 		return !s.cars[e.id].offline
 	}
@@ -412,6 +437,7 @@ func (s *Simulator) apply(e *event) {
 		} else {
 			s.sync(c)
 			c.goingOffline = true
+			s.dropOnwardPickupsForOffline(c)
 		}
 		s.match(model.TriggerSupplyOffline)
 	case eventArrive:
@@ -428,6 +454,8 @@ func (s *Simulator) apply(e *event) {
 		}
 	case eventPickupDeadline:
 		s.cancel(s.requests[e.id], "max_request_to_pickup")
+	case eventHandoffDeadline:
+		s.cancel(s.requests[e.id], "max_handoff_wait")
 	case eventBatchTick:
 		s.match(model.TriggerBatchTick)
 		s.push(&event{at: e.at + *s.settings.BatchMatchingIntervalSeconds, priority: priorityBatchTick, id: "batch_tick", kind: eventBatchTick})
@@ -523,11 +551,7 @@ func (s *Simulator) replan(c *car, stops []model.Stop) ([]model.Location, error)
 	newStops := make([]planStop, len(stops))
 	for i, stop := range stops {
 		r := s.requests[stop.RequestID]
-		location := r.input.Origin
-		if stop.Type == model.Dropoff {
-			location = r.input.Destination
-		}
-		newStops[i] = planStop{Stop: stop, location: location, seats: r.seats}
+		newStops[i] = planStop{Stop: stop, location: s.stopLocation(r, stop), seats: r.seats}
 	}
 	start := c.baseLocation
 	routed := newStops
@@ -590,7 +614,10 @@ func (s *Simulator) arrive(c *car) {
 	r := s.requests[stop.RequestID]
 	if stop.Type == model.Pickup {
 		at := s.now
-		r.driverArrivedAt, r.status = &at, model.StatusDriverArrived
+		if r.driverArrivedAt == nil {
+			r.driverArrivedAt = &at
+		}
+		r.status = model.StatusDriverArrived
 		s.log(c, "arrived_pickup", stop.RequestID, nil)
 	} else {
 		r.odometerAtDropoff = c.baseOdometer
@@ -611,6 +638,24 @@ func (s *Simulator) finishStop(c *car) {
 	r := s.requests[stop.RequestID]
 	at := s.now
 	c.actions = append(c.actions, stop.Stop)
+	if r.status == model.StatusCanceled {
+		if stop.Type == model.Pickup {
+			// Canceled before boarding; seats unchanged.
+		} else if c.aboard[stop.RequestID] > 0 {
+			delete(c.aboard, stop.RequestID)
+			c.seatsInUse -= stop.seats
+		}
+		c.version++
+		if len(c.stops) > 0 {
+			next := c.stops[0]
+			c.phase, c.legRemaining, c.legEndAt = phaseDriving, next.legDistance, s.now+next.legDuration
+			s.schedule(c)
+			return
+		}
+		c.phase, c.planID = phaseNone, ""
+		s.becameEmpty(c)
+		return
+	}
 	if stop.Type == model.Pickup {
 		c.aboard[stop.RequestID] = stop.seats
 		c.seatsInUse += stop.seats
@@ -619,13 +664,54 @@ func (s *Simulator) finishStop(c *car) {
 				other.maxCoRiders = len(c.aboard) - 1
 			}
 		}
-		r.pickupAt, r.status, r.odometerAtPickup = &at, model.StatusOnTrip, c.baseOdometer
+		if r.pickupAt == nil {
+			r.pickupAt, r.odometerAtPickup = &at, c.baseOdometer
+		}
+		if r.handoffDroppedAt != nil {
+			r.totalHandoffWaitSeconds += at - *r.handoffDroppedAt
+			r.handoffDroppedAt = nil
+		}
+		r.handoffLocation, r.handoffDeadline = nil, nil
+		r.status = model.StatusOnTrip
+		r.legOdometerAtPickup = c.baseOdometer
+		start := stop.location
+		r.legs = append(r.legs, tripLeg{supplyID: c.input.SupplyID, start: start, pickupAt: &at})
 		s.log(c, "pickup", stop.RequestID, nil)
+	} else if s.isHandoffDropoff(r, stop.Stop) {
+		delete(c.aboard, stop.RequestID)
+		c.seatsInUse -= stop.seats
+		loc := stop.location
+		r.handoffLocation, r.handoffDroppedAt = &loc, &at
+		r.handoffCount++
+		r.status, r.supplyID = model.StatusWaitingForHandoff, ""
+		r.assignedAt, r.etaAtAssignment = nil, nil
+		if len(r.legs) > 0 {
+			leg := &r.legs[len(r.legs)-1]
+			leg.end, leg.dropoffAt = stop.location, &at
+			leg.distanceMeters = c.baseOdometer - r.legOdometerAtPickup
+			leg.durationSeconds = at - *leg.pickupAt
+		}
+		if limit := s.settings.MaxHandoffWaitSeconds; limit != nil {
+			deadline := at + *limit
+			r.handoffDeadline = &deadline
+			s.push(&event{at: deadline, priority: priorityCancellation, id: r.input.RequestID, kind: eventHandoffDeadline})
+		}
+		s.log(c, "dropoff", stop.RequestID, nil)
+		// v1: install onward only after the handoff dropoff, via a matcher call now
+		// that the rider is waiting_for_handoff (no deferred/opaque pending plans).
+		s.match(model.TriggerBatchTick)
 	} else {
 		delete(c.aboard, stop.RequestID)
 		c.seatsInUse -= stop.seats
 		r.dropoffAt, r.status = &at, model.StatusCompleted
+		r.odometerAtDropoff = c.baseOdometer
 		r.ridepoolType = ridepoolType(c.actions[r.actionIndexAtAssign:], stop.RequestID)
+		if len(r.legs) > 0 {
+			leg := &r.legs[len(r.legs)-1]
+			leg.end, leg.dropoffAt = stop.location, &at
+			leg.distanceMeters = c.baseOdometer - r.legOdometerAtPickup
+			leg.durationSeconds = at - *leg.pickupAt
+		}
 		c.served++
 		s.log(c, "dropoff", stop.RequestID, nil)
 	}
@@ -723,19 +809,33 @@ func ridepoolType(actions []model.Stop, requestID string) string {
 func (s *Simulator) cancel(r *request, reason string) {
 	at := s.now
 	previous := r.status
+	supplyID := r.supplyID
 	r.status, r.canceledAt, r.cancelReason = model.StatusCanceled, &at, reason
-	if previous != model.StatusAssigned && previous != model.StatusDriverArrived {
+	r.handoffDeadline = nil
+	r.handoffLocation = nil
+	r.supplyID = ""
+	if previous != model.StatusAssigned && previous != model.StatusDriverArrived && previous != model.StatusWaitingForHandoff {
 		return
 	}
-	c := s.cars[r.supplyID]
+	if supplyID == "" {
+		return
+	}
+	c := s.cars[supplyID]
 	s.sync(c)
 	var remaining []model.Stop
 	for _, stop := range c.stops {
 		if stop.RequestID != r.input.RequestID {
 			remaining = append(remaining, stop.Stop)
+			continue
 		}
+		// Never strip an aboard rider's dropoff (pooled handoff / later leg).
+		if stop.Type == model.Dropoff && c.aboard[stop.RequestID] > 0 {
+			remaining = append(remaining, stop.Stop)
+			continue
+		}
+		// Drop the pending onward pickup and any non-aboard dropoff for this request.
 	}
-	if c.phase == phaseDwelling && c.stops[0].RequestID == r.input.RequestID {
+	if c.phase == phaseDwelling && len(c.stops) > 0 && c.stops[0].RequestID == r.input.RequestID {
 		c.phase = phaseNone // the car leaves from the stop it was dwelling at
 	}
 	planned, err := s.replan(c, remaining)

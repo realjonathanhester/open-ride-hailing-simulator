@@ -282,3 +282,70 @@ Cases in `tests/progress_test.go`. Progress is also covered by package tests in 
 
 - **Fixtures:** `base_default.toml`, `one_car_at_kezar_stadium.csv`, `single_trip.csv`
 - **Assert:** the final progress line includes a percent, a `T+` clock and `1 completed`
+
+
+### Handoffs
+
+Cases in `tests/handoff_test.go`. Scripted matchers live in `tests/handoff_matchers_test.go`. Every case sets `handoffs_enabled = true` except the byte-identity check.
+
+### 32. `two_car_successful_handoff`
+
+- **Fixtures:** `handoffs_enabled.toml`, `kezar_and_union_square_cars.csv`, `single_trip.csv`
+- **Assert:** completed with `handoff_count = 1`, zero handoff wait, two `trip_legs` rows (kezar then union), dropoff/pickup at the handoff at the same second
+
+### 33. `wrong_onward_location_rejects_batch`
+
+- **Assert:** whole batch `plan_rejected`; trip cancels on assignment timeout; no `plan_updated`
+
+### 34. `duplicate_onward_pickup_rejects_batch`
+
+- **Assert:** three-car duplicate onward batch is fully rejected
+
+### 35. `linked_handoff_batch_all_or_nothing_rejection`
+
+- **Assert:** one invalid onward plan rejects every linked change (`plan_rejected` on both cars)
+
+### 36. `onward_car_offline_then_handoff_timeout`
+
+- **Assert:** offline removes the onward stop; rider cancels with `max_handoff_wait`; no orphan
+
+### 37. `onward_car_offline_then_rematch`
+
+- **Assert:** after offline unassignment, a later matcher call assigns a replacement car and the trip completes
+
+### 38. `handoff_deadline_during_onward_assignment`
+
+- **Assert:** deadline fires while the onward car is still en route (`assigned` / not yet picked up); stops removed; `max_handoff_wait`
+
+### 39. `handoffs_disabled_omit_new_outputs`
+
+- **Fixtures:** `base_default.toml` (handoffs off)
+- **Assert:** no `handoff_count` column and no `trip_legs.csv`
+
+### 40. `capacity_freed_across_handoff`
+
+- **Assert:** a one-seat car handoffs rider 1, freeing the seat so rider 2 completes on that car
+
+
+### 41. `matcher_removal_of_onward_pickup_unassigns_visibly`
+
+- **Assert:** matcher drops an onward pickup; `stop_removed` is logged; assignment fields clear; rider returns to `waiting_for_handoff` then times out
+
+### 42. `greedy_preserves_existing_handoff_plan`
+
+- **Assert:** after a handoff plan is installed, later greedy calls keep the Union Square handoff dropoff location
+
+### 43. `third_party_assignment_before_handoff`
+
+- **Assert:** the eventual onward car can complete an unrelated trip before taking the waiting handoff rider
+
+### 44. `cancel_onward_preserves_aboard_rider_dropoff`
+
+- **Assert:** canceling an onward rider on a shared car does not remove an already-boarded rider's dropoff or drive seats negative
+
+### Case 45: Original pickup deadline does not cancel after handoff
+
+- Settings: `handoffs_pickup_deadline_after_handoff.toml` (`handoffs_enabled=true`, `max_handoff_wait_seconds=120`)
+- Demand: `late_handoff_single_trip.csv` — request at T+699 with `max_request_to_pickup_seconds=501` (deadline T+1200)
+- Matcher: `first_leg_handoff_only_matcher` — first-leg dropoff at Union Square (~491s), no onward assignment
+- Assert: handoff at T+1190; rider is **not** canceled at T+1200 with `max_request_to_pickup`; canceled at T+1310 with `max_handoff_wait`

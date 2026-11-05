@@ -52,6 +52,9 @@ func simulate(t *testing.T, settings, supply, demand string) outputs {
 		}
 		o.files[name] = string(content)
 	}
+	if content, err := os.ReadFile(filepath.Join(directory, runner.TripLegsFile)); err == nil {
+		o.files[runner.TripLegsFile] = string(content)
+	}
 	for _, trip := range o.rows(runner.TripsFile) {
 		assertValidTrip(t, trip)
 	}
@@ -190,7 +193,12 @@ func assertValidTrip(t *testing.T, trip map[string]string) {
 	case "completed":
 		requested, firstAssigned, assigned := number(t, trip["requested_at"]), number(t, trip["first_assigned_at"]), number(t, trip["assigned_at"])
 		arrived, pickup, dropoff := number(t, trip["driver_arrived_at"]), number(t, trip["pickup_at"]), number(t, trip["dropoff_at"])
-		if !(requested <= firstAssigned && firstAssigned <= assigned && assigned <= arrived && arrived <= pickup && pickup <= dropoff) {
+		handoffs := trip["handoff_count"] != "" && trip["handoff_count"] != "0"
+		if handoffs {
+			if !(requested <= firstAssigned && firstAssigned <= pickup && pickup <= dropoff && requested <= assigned && assigned <= dropoff) {
+				t.Errorf("%s: timestamps out of order", id)
+			}
+		} else if !(requested <= firstAssigned && firstAssigned <= assigned && assigned <= arrived && arrived <= pickup && pickup <= dropoff) {
 			t.Errorf("%s: timestamps out of order", id)
 		}
 		if number(t, trip["wait_seconds"]) != pickup-requested {
@@ -220,7 +228,7 @@ func assertValidTrip(t *testing.T, trip map[string]string) {
 		if trip["canceled_at"] == "" || trip["cancel_reason"] == "" {
 			t.Errorf("%s: a canceled trip needs canceled_at and cancel_reason", id)
 		}
-		if trip["pickup_at"] != "" || trip["ridepool_type"] != "" {
+		if trip["cancel_reason"] != "max_handoff_wait" && (trip["pickup_at"] != "" || trip["ridepool_type"] != "") {
 			t.Errorf("%s: a canceled trip has pickup_at or ridepool_type", id)
 		}
 	default:

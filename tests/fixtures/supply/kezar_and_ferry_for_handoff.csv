@@ -1,0 +1,3 @@
+supply_id,online_at,online_lat,online_lng,offline_at,num_available_seats
+car_at_kezar_stadium,1767225600,37.767263,-122.456743,,4
+car_at_ferry_building,1767225600,37.795490,-122.393680,1767226211,4
