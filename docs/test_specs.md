@@ -349,3 +349,63 @@ Cases in `tests/handoff_test.go`. Scripted matchers live in `tests/handoff_match
 - Demand: `late_handoff_single_trip.csv` — request at T+699 with `max_request_to_pickup_seconds=501` (deadline T+1200)
 - Matcher: `first_leg_handoff_only_matcher` — first-leg dropoff at Union Square (~491s), no onward assignment
 - Assert: handoff at T+1190; rider is **not** canceled at T+1200 with `max_request_to_pickup`; canceled at T+1310 with `max_handoff_wait`
+
+
+### Comparison B transfer matcher
+
+Cases in `tests/transfermatcher_test.go` and `experiments/transfermatcher/transfermatcher_test.go`. Design: `design/comparison_b_matcher.md`.
+
+### 46. `transfermatcher_handoffs_off_matches_greedy`
+
+- **Fixtures:** `transfermatcher_handoffs_off.toml` vs `transfermatcher_greedy.toml`, `kezar_and_union_square_cars.csv`, `simple_pool.csv`
+- **Assert:** trips, supply events and supply summary are byte-identical
+
+### 46b. `transfermatcher_transfers_off_matches_greedy_pooling`
+
+- **Fixtures:** `transfermatcher_transfers_off.toml` vs `greedy_handoffs_on.toml`, same pooling supply/demand
+- **Assert:** with `handoffs_enabled=true` and `transfers_enabled=false`, trips/events/summaries match built-in greedy (delegated; no duplicate-greedy drift). Package tests also cover a busy multi-request fixture with an unrelated `waiting_for_handoff` rider: ordinary plans match greedy while onward rematch still runs in the same Match call
+
+### 47. `transfermatcher_metadata_records_ratio_and_matcher`
+
+- **Assert:** run_metadata settings include `matching_hook=transfermatcher`, `transfers_enabled=true`, `max_rider_path_ratio=1.25`, `max_insertion_evaluations=5000`, `max_handoff_wait_seconds=300`
+
+### 48. `transfermatcher_deterministic_outputs`
+
+- **Assert:** two identical treatment runs on the mid-corridor transfer fixture produce byte-identical trips, events and trip_legs
+
+### 49. `transfermatcher_budget_skips_transfer`
+
+- **Fixtures:** `transfermatcher_budget_1.toml` (`max_insertion_evaluations=1`)
+- Package test: tiny transfer budget still lets built-in greedy assign a single-leg trip; transfer search does not win. The 5000 ceiling is transfer/provisional/onward only — not a total greedy+transfer router-call bound (OD single-leg cap distance is outside it too)
+
+### 50. `realized_aboard_distance_exposed_to_matcher`
+
+- **Matcher:** `capture_realized_distance_matcher`
+- **Assert:** `RealizedAboardDistanceMeters` is 0 before the handoff dropoff and equals the completed first `trip_legs` distance at the live `waiting_for_handoff` match
+
+### 51. `transfermatcher_straight_line_transfer_wins`
+
+- **Fixtures:** `transfermatcher_treatment.toml`, `transfer_mid_corridor_cars.csv`, `transfer_win_mid_corridor.csv`
+- **Assert:** completed with `handoff_count=1`, two trip legs, realized+second-leg ≤ floor(1.25×OD), second-leg pickup at/after the handoff dropoff (same-car handoff allowed); ordinary straight-line router only
+
+### 52. `comparison_b_control_settings_omit_transfer_fields`
+
+- **Assert:** Comparison-B control settings JSON omits transfer fields and uses `greedy_nearest_eta`
+
+### 53. `comparison_b_treatment_settings_record_matcher_config`
+
+- **Assert:** Comparison-B treatment settings JSON records `transfers_enabled`, ratio, budget and 300s handoff cap
+
+### 54. Ownership retention under transfer/onward overlays (package)
+
+- **Assert:** transfer A insertion retains every other pickup already on A's working plan (assigned S with reassignment off stays on car_a; driver_arrived S is never omitted from an emitted car_a plan). Onward rematch skips candidate plans that drop an earlier overlay pickup. Helper `retainsPickups` rejects displacing candidates.
+
+### 55. Compliant onward insertion when min-end violates remaining (package)
+
+- **Assert:** `bestOnwardInsertion` selects earliest-pickup/min-end among path≤remaining candidates; an over-cap min-end via-far insertion loses to a compliant alternative.
+
+### 56. Handoff-leg freeze across greedy/transfer/onward (package)
+
+- **Assert:** a car whose plan already has a first-leg handoff dropoff rejects new ordinary greedy insertions, new transfer A/B candidacy, and different-onward insertions; the existing transfer leg's stops are unchanged. Ordinary greedy freeze likewise covers handoff dropoffs (not only onward pickups).
+
+Package unit tests also cover: delegated greedy (no second implementation), only A committed at transfer selection, per-(A,B) handoff points including each B location, compliant insertion when ETA-best violates the path cap, compliant onward insertion when min-end violates the remaining path budget, rematch path ratio, handoff-leg freeze (v1) for ordinary greedy and for new transfer/onward candidates on cars already holding a handoff dropoff or onward pickup, onward offline rematch, ownership retention of other riders' pickups under transfer/onward overlays (assigned and driver_arrived; no silent displace), `P_max=8` skip on transfer/onward only, and transfers_enabled=false plan equality on busy fixtures.

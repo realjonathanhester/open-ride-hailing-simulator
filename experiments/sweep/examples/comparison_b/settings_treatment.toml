@@ -1,0 +1,28 @@
+# Comparison B treatment: same greedy ordinary behavior plus optional transfer
+# via experiments/transfermatcher. Handoffs on with a fixed 300s handoff wait.
+# max_rider_path_ratio, max_insertion_evaluations and transfers_enabled are
+# recorded in run metadata. Fleet fractions, reassignment and max_candidate_cars
+# are set on the rhs-sweep command line (see README.md).
+# DO NOT RUN until Technical Program Manager review.
+[simulation]
+pooling_enabled = true
+reassignment_enabled = true
+handoffs_enabled = true
+max_handoff_wait_seconds = 300
+max_request_to_assignment_seconds = 300
+max_request_to_pickup_seconds = 1200
+pickup_dwell_seconds = 30
+dropoff_dwell_seconds = 15
+default_num_requested_seats = 1
+default_num_available_seats = 4
+average_speed_meters_per_second = 8.0
+timezone = "America/Chicago"
+
+[hooks]
+matching = "transfermatcher"
+routing = "straight_line"
+
+[matching]
+transfers_enabled = true
+max_rider_path_ratio = 1.25
+max_insertion_evaluations = 5000

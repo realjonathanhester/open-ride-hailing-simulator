@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 
+	_ "github.com/realjonathanhester/ride-hailing-simulator/experiments/transfermatcher"
 	"github.com/realjonathanhester/ride-hailing-simulator/progress"
 	"github.com/realjonathanhester/ride-hailing-simulator/runner"
 	"github.com/realjonathanhester/ride-hailing-simulator/viewer"

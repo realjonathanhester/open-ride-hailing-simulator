@@ -66,6 +66,9 @@ The built-in `greedy_nearest_eta` matcher reads one option from a `[matching]` s
 | Setting | Default | Meaning |
 |---|---|---|
 | `max_candidate_cars` | 0 (no limit) | Before asking the router for pickup times, keep only the N cars closest to the request's pickup by haversine distance from each car's current, interpolated position, ties to the lowest `supply_id`. The limit applies separately to open cars (empty plan: idle or repositioning) and to busy cars (a non-empty plan: forward dispatch or pooling), so up to 2N cars are priced per request. It applies on every trigger, including batch ticks and reassignment checks; the request's current car is always priced. Router prefetches cover only the kept cars. 0 prices every car and is left out of the `settings` JSON, so existing runs keep their bytes and `settings_sha256` |
+| `max_rider_path_ratio` | none | Optional. Recorded in run metadata when set. Used by `experiments/transfermatcher` as the transfer path-ratio cap (Comparison B uses 1.25). Left out of the settings JSON when unset |
+| `max_insertion_evaluations` | none | Optional. Recorded in run metadata when set. Per-Match insertion-evaluation budget for `experiments/transfermatcher` **transfer / provisional / onward scoring only** (Comparison B uses 5000; one evaluation includes path-distance measurement). Does not cap built-in greedy. Left out when unset |
+| `transfers_enabled` | none | Optional experiment-only switch for `transfermatcher`. Recorded when set. Default true when unset. False keeps greedy ordinary assignments with handoffs on, while still rematching `waiting_for_handoff` |
 
 `[hooks] routing = "osrm"` selects the OSRM router; its options live in their own `[osrm]` section:
 
@@ -206,7 +209,7 @@ Optional extensions a router may implement; callers use them when present and fa
 |---|---|
 | Input | `now`, `trigger` (`request`, `supply_online`, `supply_offline` or `batch_tick`), the settings, every online supply, every open request (requested or assigned, not yet picked up, not canceled), and the routing handle |
 | Supply view | `{supply_id, location, state, num_available_seats, seats_in_use, plan}`. The plan lists each waypoint as `{request_id, type: pickup\|dropoff, location, eta_at}` for every remaining stop |
-| Request view | `{request_id, requested_at, origin, destination, num_requested_seats, status, supply_id, assigned_at, cancel_at}`. `cancel_at` is the earliest time a wait limit will cancel it |
+| Request view | `{request_id, requested_at, origin, destination, num_requested_seats, status, supply_id, assigned_at, cancel_at, handoff_location?, realized_aboard_distance_meters}`. `cancel_at` is the earliest time a wait limit will cancel it. `realized_aboard_distance_meters` is the sum of completed trip-leg distances (exact O→…→H after a handoff dropoff); read-only for matchers |
 | Output | A list of plan changes: `{supply_id, plan}`, where `plan` is the ordered list of stops, each `{request_id, type, location?}` (`location` optional). An empty list means no supply state changes (a no-op) |
 | Open requests | Also includes `waiting_for_handoff` riders. `handoff_location` is set on those views |
 

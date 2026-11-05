@@ -423,7 +423,6 @@ func (pooledCancelOnwardMatcher) Match(in model.MatchInput) []model.PlanChange {
 	return nil
 }
 
-
 // firstLegHandoffOnlyMatcher installs a handoff dropoff at Union Square and
 // never assigns an onward car, so the handoff wait governs resolution.
 type firstLegHandoffOnlyMatcher struct{}
@@ -439,4 +438,65 @@ func (firstLegHandoffOnlyMatcher) Match(in model.MatchInput) []model.PlanChange 
 		}
 	}
 	return nil
+}
+
+// captureRealizedDistanceMatcher records RealizedAboardDistanceMeters before and
+// after the handoff dropoff, and performs a two-car handoff like twoCarHandoffMatcher.
+var captureRealized = &realizedCapture{}
+
+type realizedCapture struct {
+	beforeHandoff int64
+	afterHandoff  int64
+	sawWaiting    bool
+}
+
+func (c *realizedCapture) reset() {
+	c.beforeHandoff, c.afterHandoff, c.sawWaiting = 0, 0, false
+}
+
+func init() {
+	mustRegisterHandoff("capture_realized_distance_matcher", captureRealizedDistanceMatcher{})
+}
+
+type captureRealizedDistanceMatcher struct{}
+
+func (captureRealizedDistanceMatcher) Match(in model.MatchInput) []model.PlanChange {
+	handoff := loc(unionSquare)
+	for _, r := range in.Requests {
+		if r.Status == model.StatusWaitingForHandoff {
+			captureRealized.sawWaiting = true
+			captureRealized.afterHandoff = r.RealizedAboardDistanceMeters
+			for _, s := range in.Supplies {
+				if s.SupplyID == "car_at_union_square" && len(s.Plan) == 0 {
+					return []model.PlanChange{{SupplyID: s.SupplyID, Plan: []model.Stop{
+						{RequestID: r.RequestID, Type: model.Pickup, Location: handoff},
+						{RequestID: r.RequestID, Type: model.Dropoff},
+					}}}
+				}
+			}
+			return nil
+		}
+		if r.Status == model.StatusRequested || r.Status == model.StatusAssigned || r.Status == model.StatusDriverArrived {
+			if r.RealizedAboardDistanceMeters != 0 && !captureRealized.sawWaiting {
+				captureRealized.beforeHandoff = r.RealizedAboardDistanceMeters
+			}
+			if r.Status == model.StatusRequested {
+				captureRealized.beforeHandoff = r.RealizedAboardDistanceMeters
+			}
+		}
+	}
+	id := ""
+	for _, r := range in.Requests {
+		if r.Status == model.StatusRequested {
+			id = r.RequestID
+			captureRealized.beforeHandoff = r.RealizedAboardDistanceMeters
+		}
+	}
+	if id == "" || hasPlan(in, "car_at_kezar_stadium") {
+		return nil
+	}
+	return []model.PlanChange{{SupplyID: "car_at_kezar_stadium", Plan: []model.Stop{
+		{RequestID: id, Type: model.Pickup},
+		{RequestID: id, Type: model.Dropoff, Location: handoff},
+	}}}
 }

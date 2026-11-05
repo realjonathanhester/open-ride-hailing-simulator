@@ -41,6 +41,19 @@ type Settings struct {
 	// until the next actual pickup (covering waiting_for_handoff and the
 	// assigned / driver_arrived onward states). Nil means off.
 	MaxHandoffWaitSeconds *int64 `json:"max_handoff_wait_seconds,omitempty"`
+	// MaxRiderPathRatio is an optional transfer-matcher path-ratio cap recorded
+	// in run metadata. Zero is left out of the settings JSON.
+	MaxRiderPathRatio float64 `json:"max_rider_path_ratio,omitempty"`
+	// MaxInsertionEvaluations is an optional per-Match TOTAL insertion-evaluation
+	// budget for the transfer matcher (greedy + transfer + onward), recorded in
+	// run metadata. Zero is left out. One evaluation is one candidate scoring
+	// operation including its path-distance measurement.
+	MaxInsertionEvaluations int `json:"max_insertion_evaluations,omitempty"`
+	// TransfersEnabled is an experiment-only switch for experiments/transfermatcher.
+	// Nil defaults to true when the transfer matcher runs. False keeps built-in
+	// greedy ordinary assignments even with handoffs_enabled, while still allowing
+	// onward rematch for waiting_for_handoff riders. Recorded when non-nil.
+	TransfersEnabled *bool `json:"transfers_enabled,omitempty"`
 	// Timezone is an optional IANA zone name for showing simulated times as
 	// local wall-clock times. It never affects the simulation; it is left out
 	// of the settings JSON when empty so existing settings hashes don't change.
@@ -221,6 +234,10 @@ type RequestView struct {
 	// HandoffLocation is set when status is waiting_for_handoff: the place
 	// the rider was dropped and must be picked up again.
 	HandoffLocation *Location
+	// RealizedAboardDistanceMeters is the sum of completed trip-leg distances
+	// so far. After the first handoff dropoff it is the exact O→…→H driven.
+	// Read-only for matchers; zero when no leg has completed yet.
+	RealizedAboardDistanceMeters int64
 }
 
 // MatchInput is everything the matcher sees on one call.
@@ -254,9 +271,9 @@ const (
 
 // Request statuses.
 const (
-	StatusRequested     = "requested"
-	StatusAssigned      = "assigned"
-	StatusDriverArrived = "driver_arrived"
+	StatusRequested         = "requested"
+	StatusAssigned          = "assigned"
+	StatusDriverArrived     = "driver_arrived"
 	StatusOnTrip            = "on_trip"
 	StatusWaitingForHandoff = "waiting_for_handoff"
 	StatusCompleted         = "completed"
