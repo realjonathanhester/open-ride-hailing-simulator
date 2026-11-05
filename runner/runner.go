@@ -221,6 +221,7 @@ func RunWithOptions(settingsPath string, paths Paths, options Options) (*simulat
 type osrmCounter interface {
 	RequestCounts() (table, route int64)
 	CacheHits() int64
+	CacheMisses() int64
 }
 
 func toSnapshot(p simulator.Progress, counter osrmCounter) progress.Snapshot {
@@ -237,6 +238,7 @@ func toSnapshot(p simulator.Progress, counter osrmCounter) progress.Snapshot {
 		snap.OSRM = true
 		snap.OSRMTable, snap.OSRMRoute = counter.RequestCounts()
 		snap.OSRMCacheHits = counter.CacheHits()
+		snap.OSRMCacheMisses = counter.CacheMisses()
 	}
 	return snap
 }

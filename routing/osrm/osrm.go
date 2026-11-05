@@ -90,6 +90,8 @@ type Router struct {
 	// cacheHits counts pairs served from memory or the cache file without a
 	// new HTTP request (costs already known, or a geometry already loaded).
 	cacheHits atomic.Int64
+	// cacheMisses counts pairs that needed a new HTTP request.
+	cacheMisses atomic.Int64
 }
 
 func round5(v float64) int64 { return int64(math.Round(v * 1e5)) }
@@ -315,6 +317,7 @@ func (r *Router) ensureCosts(pairs []pair, target map[pair]cost) error {
 	if hits > 0 {
 		r.cacheHits.Add(hits)
 	}
+	r.cacheMisses.Add(int64(len(missing)))
 	if len(missing) == 0 {
 		return nil
 	}
@@ -371,6 +374,9 @@ func sortedPoints(set map[point]bool) []point {
 func (r *Router) RequestCounts() (table, route int64) {
 	return r.tableRequests.Load(), r.routeRequests.Load()
 }
+
+// CacheMisses returns how many pairs needed a new HTTP request.
+func (r *Router) CacheMisses() int64 { return r.cacheMisses.Load() }
 
 // CacheHits returns how many pairs were served from memory or the cache
 // file without a new HTTP request.
@@ -466,6 +472,7 @@ func (r *Router) geometry(p pair) ([]model.Location, error) {
 		r.cacheHits.Add(1)
 		return shape, nil
 	}
+	r.cacheMisses.Add(1)
 	if r.offline {
 		return nil, fmt.Errorf("osrm: route %s -> %s is not in cache %s and the server is unreachable", p.from.coordinate(), p.to.coordinate(), r.opts.CachePath)
 	}
