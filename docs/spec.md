@@ -56,6 +56,8 @@ Replay a time-ordered sequence of rideshare requests against a fleet of supply (
 | `default_num_available_seats` | int | 4 | Used when a supply leaves it out |
 | `average_speed_meters_per_second` | float | router-specific | Used only by the built-in straight-line router |
 | `timezone` | IANA zone name | none | Display only: the zone where the scenario takes place, such as `America/Chicago`. Never changes the simulation. Recorded in run metadata so tools can show local wall-clock times. An unknown name (or `Local`) is an error |
+| `handoffs_enabled` | bool | false | Turns on generic mid-trip handoff primitives (optional stop locations, `waiting_for_handoff`, linked-batch validation, `trip_legs.csv`). Left out of the settings JSON when false so existing hashes stay the same |
+| `max_handoff_wait_seconds` | seconds | none (off) | Deadline from each handoff dropoff until the next actual pickup, covering `waiting_for_handoff` and the assigned / `driver_arrived` onward states. Does not reuse `max_request_to_pickup_seconds` |
 
 The settings file is TOML. It also names the matching hook, the driver behavior plugin (`[hooks] driver_behavior`, default `simple`), the routing hook, and the reader and writer plugins along with their options, such as file paths or a database connection.
 
@@ -141,13 +143,24 @@ stateDiagram-v2
     assigned --> driver_arrived: reaches origin
     driver_arrived --> on_trip: pickup dwell
     on_trip --> completed: reaches destination
+    on_trip --> waiting_for_handoff: handoff dropoff
+    waiting_for_handoff --> assigned: onward car assigned
+    waiting_for_handoff --> canceled: handoff wait limit
     requested --> canceled: wait limit
     assigned --> canceled: wait limit
     completed --> [*]
     canceled --> [*]
 ```
 
-A cancellation records which limit fired in `cancel_reason` (`max_request_to_assignment` or `max_request_to_pickup`). The assignment limit is checked against `requested_at` plus `max_request_to_assignment_seconds`: at any time from that deadline on, if the request is waiting with no car assigned (never assigned, or unassigned again), the rider cancels. Requests already picked up are never affected. A rider whose car is already at the origin can still cancel during the pickup dwell. If a request is canceled, the simulator removes its stops from the car's plan and reroutes the car.
+A cancellation records which limit fired in `cancel_reason` (`max_request_to_assignment`, `max_request_to_pickup`, or `max_handoff_wait`). The assignment limit is checked against `requested_at` plus `max_request_to_assignment_seconds`: at any time from that deadline on, if the request is waiting with no car assigned (never assigned, or unassigned again), the rider cancels. `max_request_to_pickup_seconds` applies only to not-yet-boarded current-leg states (`requested`, `assigned`, `driver_arrived`), never to later legs. `max_handoff_wait_seconds` is measured from each actual handoff dropoff until the next pickup. An `on_trip` rider is never canceled by wait limits. If a request is canceled, the simulator removes its stops from the car's plan and reroutes the car.
+
+### Handoffs (optional)
+
+When `handoffs_enabled` is true, a matcher stop may include an optional `location`. Unset means today's behavior: pickup at origin, dropoff at destination. A dropoff at the destination (location absent or equal) is always **final**. A **handoff dropoff** uses an explicit location that differs from the destination; the rider leaves the car as `waiting_for_handoff` and seats free. An **onward pickup** of a waiting rider must use exactly that handoff location. Core allows at most one outstanding onward pickup per rider.
+
+The simulator validates the **complete matcher batch** against the proposed post-batch state. A handoff dropoff may have zero or one onward pickup in that batch (v1 installs onward only after the dropoff); more than one onward pickup, duplicate final dropoffs, or wrong onward locations reject the batch. At most one pickup is allowed globally per request, except the first-leg origin pickup paired with a single onward pickup at the handoff location. Linked handoff batches are **all-or-nothing**: any invalid plan, router failure, or `plan_declined` rejects every proposed change (`plan_rejected` per supply, prior plans kept).
+
+After a handoff dropoff the rider becomes `waiting_for_handoff` and the matcher is called once so an onward car can be assigned immediately. There are no deferred/opaque pending plans. If an onward car goes offline before pickup, or a matcher drops that onward pickup, the core removes only the pending onward pickup (never an aboard rider's dropoff), clears `assigned_at` / ETA, leaves the rider `waiting_for_handoff` unassigned, logs `stop_removed`, and lets later matcher calls rematch. The handoff timeout guarantees eventual resolution.
 
 Supply states are `offline`, `idle` (online with no plan, standing still), `repositioning` (online with no plan, driving to a target its [driver behavior](#driver-behavior) chose), `en_route` (next stop is a pickup and no rider is aboard), `on_trip` (at least one rider aboard), and `going_offline` (past offline_at but still finishing its plan).
 
@@ -194,7 +207,8 @@ Optional extensions a router may implement; callers use them when present and fa
 | Input | `now`, `trigger` (`request`, `supply_online`, `supply_offline` or `batch_tick`), the settings, every online supply, every open request (requested or assigned, not yet picked up, not canceled), and the routing handle |
 | Supply view | `{supply_id, location, state, num_available_seats, seats_in_use, plan}`. The plan lists each waypoint as `{request_id, type: pickup\|dropoff, location, eta_at}` for every remaining stop |
 | Request view | `{request_id, requested_at, origin, destination, num_requested_seats, status, supply_id, assigned_at, cancel_at}`. `cancel_at` is the earliest time a wait limit will cancel it |
-| Output | A list of plan changes: `{supply_id, plan}`, where `plan` is the ordered list of stops, each `{request_id, type}`. An empty list means no supply state changes (a no-op) |
+| Output | A list of plan changes: `{supply_id, plan}`, where `plan` is the ordered list of stops, each `{request_id, type, location?}` (`location` optional). An empty list means no supply state changes (a no-op) |
+| Open requests | Also includes `waiting_for_handoff` riders. `handoff_location` is set on those views |
 
 The matcher sends only the ordered stops. The simulator starts the plan from the car's current location and adds the route and the ETA of each stop; that full plan is what the matcher sees on its next call.
 
@@ -289,7 +303,25 @@ Hooks are chosen by name from a registry in `runner`. An external package can ca
 | `pickup_distance_meters` | Distance the car drove to the pickup after the final assignment |
 | `max_co_riders` | Most other riders aboard at once while this rider was aboard; `0` means never shared. Empty if never picked up |
 | `canceled_at` | When the rider canceled, if they did |
-| `cancel_reason` | Which limit fired: `max_request_to_assignment` or `max_request_to_pickup` |
+| `cancel_reason` | Which limit fired: `max_request_to_assignment`, `max_request_to_pickup`, or `max_handoff_wait` |
+| `handoff_count` | Only when `handoffs_enabled`: number of handoff dropoffs on this trip |
+| `total_handoff_wait_seconds` | Only when `handoffs_enabled`: sum of waits from each handoff dropoff to the next pickup |
+
+### 1b. Trip legs (only when `handoffs_enabled`)
+
+One row per vehicle leg, deterministic order by `request_id` then `leg_index`:
+
+| Field | Meaning |
+|---|---|
+| `request_id` | The request |
+| `leg_index` | 0-based index along the trip |
+| `supply_id` | Car that drove this leg |
+| `start_lat`, `start_lng` | Pickup / handoff start |
+| `end_lat`, `end_lng` | Dropoff / handoff end |
+| `pickup_at`, `dropoff_at` | Board and alight times |
+| `distance_meters`, `duration_seconds` | Driven on this leg |
+
+Non-handoff-configured runs omit these columns and `trip_legs.csv`, so existing goldens stay byte-identical.
 
 ### 2. Supply event log (one row per action)
 

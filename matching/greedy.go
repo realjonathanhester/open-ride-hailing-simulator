@@ -54,9 +54,13 @@ func (g *Greedy) Match(in model.MatchInput) []model.PlanChange {
 		supplies[s.SupplyID] = s
 		var plan []model.Stop
 		for _, w := range s.Plan {
-			stop := model.Stop{RequestID: w.RequestID, Type: w.Type}
+			// Always preserve the waypoint location so handoff plans survive even
+			// when the rider is on_trip and absent from RequestView.
+			loc := w.Location
+			stop := model.Stop{RequestID: w.RequestID, Type: w.Type, Location: &loc}
+			key := model.StopKey(stop)
+			ctx.stops[key] = stopInfo{w.Location, w.NumRequestedSeats}
 			plan = append(plan, stop)
-			ctx.stops[stop] = stopInfo{w.Location, w.NumRequestedSeats}
 		}
 		work[s.SupplyID] = plan
 		original[s.SupplyID] = plan
@@ -74,7 +78,11 @@ func (g *Greedy) Match(in model.MatchInput) []model.PlanChange {
 		return requests[i].RequestID < requests[j].RequestID
 	})
 	for _, r := range requests {
-		ctx.stops[model.Stop{RequestID: r.RequestID, Type: model.Pickup}] = stopInfo{r.Origin, r.NumRequestedSeats}
+		pickup := r.Origin
+		if r.Status == model.StatusWaitingForHandoff && r.HandoffLocation != nil {
+			pickup = *r.HandoffLocation
+		}
+		ctx.stops[model.Stop{RequestID: r.RequestID, Type: model.Pickup}] = stopInfo{pickup, r.NumRequestedSeats}
 		ctx.stops[model.Stop{RequestID: r.RequestID, Type: model.Dropoff}] = stopInfo{r.Destination, r.NumRequestedSeats}
 	}
 
@@ -86,7 +94,7 @@ func (g *Greedy) Match(in model.MatchInput) []model.PlanChange {
 	}
 	for _, r := range requests {
 		switch r.Status {
-		case model.StatusRequested:
+		case model.StatusRequested, model.StatusWaitingForHandoff:
 		case model.StatusAssigned:
 			if !in.Settings.ReassignmentEnabled {
 				continue
@@ -151,11 +159,15 @@ func (ctx *matchContext) prefetch(eligible []model.SupplyView, work map[string][
 	}
 	var sources, destinations []model.Location
 	for _, r := range requests {
-		if r.Status != model.StatusRequested && (r.Status != model.StatusAssigned || !ctx.in.Settings.ReassignmentEnabled) {
+		if r.Status != model.StatusRequested && r.Status != model.StatusWaitingForHandoff && (r.Status != model.StatusAssigned || !ctx.in.Settings.ReassignmentEnabled) {
 			continue
 		}
-		sources = append(sources, r.Origin)
-		destinations = append(destinations, r.Origin, r.Destination)
+		pickup := r.Origin
+		if r.Status == model.StatusWaitingForHandoff && r.HandoffLocation != nil {
+			pickup = *r.HandoffLocation
+		}
+		sources = append(sources, pickup)
+		destinations = append(destinations, pickup, r.Destination)
 	}
 	if len(destinations) == 0 {
 		return
@@ -184,7 +196,11 @@ func nearestCandidates(eligible []model.SupplyView, work map[string][]model.Stop
 		if s.SupplyID == current || s.NumAvailableSeats < r.NumRequestedSeats {
 			continue
 		}
-		entry := ranked{s, routing.HaversineMeters(s.Location, r.Origin)}
+		pickup := r.Origin
+		if r.Status == model.StatusWaitingForHandoff && r.HandoffLocation != nil {
+			pickup = *r.HandoffLocation
+		}
+		entry := ranked{s, routing.HaversineMeters(s.Location, pickup)}
 		if len(work[s.SupplyID]) == 0 {
 			open = append(open, entry)
 		} else {
@@ -234,7 +250,7 @@ func (ctx *matchContext) prefetchPruned(eligible []model.SupplyView, work map[st
 		}
 	}
 	for _, r := range requests {
-		if r.Status != model.StatusRequested && (r.Status != model.StatusAssigned || !ctx.in.Settings.ReassignmentEnabled) {
+		if r.Status != model.StatusRequested && r.Status != model.StatusWaitingForHandoff && (r.Status != model.StatusAssigned || !ctx.in.Settings.ReassignmentEnabled) {
 			continue
 		}
 		current := ""
@@ -245,7 +261,11 @@ func (ctx *matchContext) prefetchPruned(eligible []model.SupplyView, work map[st
 		if s, ok := supplies[current]; ok {
 			cars = append(cars, s)
 		}
-		for _, l := range []model.Location{r.Origin, r.Destination} {
+		pickup := r.Origin
+		if r.Status == model.StatusWaitingForHandoff && r.HandoffLocation != nil {
+			pickup = *r.HandoffLocation
+		}
+		for _, l := range []model.Location{pickup, r.Destination} {
 			addSource(l)
 			addDestination(l)
 		}
@@ -267,6 +287,13 @@ func (ctx *matchContext) prefetchPruned(eligible []model.SupplyView, work map[st
 func (ctx *matchContext) bestInsertion(s model.SupplyView, plan []model.Stop, requestID string) ([]model.Stop, int64, bool) {
 	pickup := model.Stop{RequestID: requestID, Type: model.Pickup}
 	dropoff := model.Stop{RequestID: requestID, Type: model.Dropoff}
+	for _, r := range ctx.in.Requests {
+		if r.RequestID == requestID && r.Status == model.StatusWaitingForHandoff && r.HandoffLocation != nil {
+			loc := *r.HandoffLocation
+			pickup.Location = &loc
+			break
+		}
+	}
 	n := len(plan)
 	firstPosition := 0
 	if n > 0 && len(s.Plan) > 0 && s.Plan[0].EtaAt <= ctx.in.Now && s.Plan[0].RequestID == plan[0].RequestID && s.Plan[0].Type == plan[0].Type {
@@ -304,7 +331,7 @@ func (ctx *matchContext) bestInsertion(s model.SupplyView, plan []model.Stop, re
 func (ctx *matchContext) evaluate(s model.SupplyView, plan []model.Stop) (map[model.Stop]int64, int64, bool) {
 	inPlan := map[model.Stop]bool{}
 	for _, stop := range plan {
-		inPlan[stop] = true
+		inPlan[model.StopKey(stop)] = true
 	}
 	seats, riders := s.SeatsInUse, 0
 	for _, stop := range plan {
@@ -314,8 +341,11 @@ func (ctx *matchContext) evaluate(s model.SupplyView, plan []model.Stop) (map[mo
 	}
 	locations := make([]model.Location, len(plan))
 	for i, stop := range plan {
-		info := ctx.stops[stop]
+		info := ctx.stops[model.StopKey(stop)]
 		locations[i] = info.location
+		if stop.Location != nil {
+			locations[i] = *stop.Location
+		}
 		if stop.Type == model.Pickup {
 			seats += info.seats
 			riders++
@@ -339,7 +369,7 @@ func (ctx *matchContext) evaluate(s model.SupplyView, plan []model.Stop) (map[mo
 	clock := ctx.in.Now
 	for i, stop := range plan {
 		clock += legs[i].DurationSeconds
-		etas[stop] = clock
+		etas[model.StopKey(stop)] = clock
 		if stop.Type == model.Pickup {
 			clock += ctx.in.Settings.PickupDwellSeconds
 		} else {
@@ -364,7 +394,7 @@ func equalPlans(a, b []model.Stop) bool {
 		return false
 	}
 	for i := range a {
-		if a[i] != b[i] {
+		if !model.SameStop(a[i], b[i]) {
 			return false
 		}
 	}

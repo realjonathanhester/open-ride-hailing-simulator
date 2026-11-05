@@ -16,6 +16,10 @@ var (
 		"reassign_count", "ridepool_type", "eta_at_assignment_seconds", "driver_arrived_at", "pickup_at", "dropoff_at", "wait_seconds",
 		"trip_distance_meters", "trip_duration_seconds", "direct_distance_meters", "direct_duration_seconds", "detour_ratio", "pickup_distance_meters",
 		"max_co_riders", "canceled_at", "cancel_reason"}
+	// TripHandoffColumns are appended to TripColumns when handoffs are enabled.
+	TripHandoffColumns = []string{"handoff_count", "total_handoff_wait_seconds"}
+	TripLegColumns     = []string{"request_id", "leg_index", "supply_id", "start_lat", "start_lng", "end_lat", "end_lng",
+		"pickup_at", "dropoff_at", "distance_meters", "duration_seconds"}
 	SupplyEventColumns = []string{"supply_id", "at", "action", "lat", "lng", "state_after", "request_id", "plan_id", "seats_in_use",
 		"odometer_meters", "driven_polyline", "planned_polyline", "plan"}
 	SupplySummaryColumns = []string{"supply_id", "online_at", "offline_at", "idle_seconds", "en_route_seconds", "on_trip_seconds",
@@ -24,7 +28,25 @@ var (
 		"requests_canceled_max_request_to_pickup", "requests_unserved", "median_wait_seconds", "p90_wait_seconds", "mean_detour_ratio",
 		"fleet_utilization", "matcher_calls_request", "matcher_calls_supply_online", "matcher_calls_supply_offline", "matcher_calls_batch_tick",
 		"matcher_duration_microseconds", "router_duration_microseconds"}
+	// RunSummaryHandoffColumns are appended when handoffs are enabled.
+	RunSummaryHandoffColumns = []string{"requests_canceled_max_handoff_wait"}
 )
+
+// TripColumnsFor returns the trips header for these settings.
+func TripColumnsFor(settings model.Settings) []string {
+	if !settings.HandoffsEnabled {
+		return TripColumns
+	}
+	return append(append([]string{}, TripColumns...), TripHandoffColumns...)
+}
+
+// RunSummaryColumnsFor returns the run summary header for these settings.
+func RunSummaryColumnsFor(settings model.Settings) []string {
+	if !settings.HandoffsEnabled {
+		return RunSummaryColumns
+	}
+	return append(append([]string{}, RunSummaryColumns...), RunSummaryHandoffColumns...)
+}
 
 // RunSummaryTimingColumns are the only nondeterministic run summary columns.
 var RunSummaryTimingColumns = []string{"matcher_duration_microseconds", "router_duration_microseconds"}
@@ -32,6 +54,7 @@ var RunSummaryTimingColumns = []string{"matcher_duration_microseconds", "router_
 // Result holds every output table as rows of CSV cells.
 type Result struct {
 	Trips         [][]string
+	TripLegs      [][]string
 	SupplyEvents  [][]string
 	SupplySummary [][]string
 	RunSummary    [][]string
@@ -84,7 +107,7 @@ func (s *Simulator) result() *Result {
 	out := &Result{SupplyEvents: s.eventRows}
 	var waits []int64
 	var detourSum float64
-	completed, canceledAssignment, canceledPickup, unserved := 0, 0, 0, 0
+	completed, canceledAssignment, canceledPickup, canceledHandoff, unserved := 0, 0, 0, 0, 0
 	for _, id := range s.requestOrder {
 		r := s.requests[id]
 		row := []string{id, r.status, formatInt(r.input.RequestedAt), strconv.Itoa(r.seats), formatOptional(r.firstAssignedAt),
@@ -98,10 +121,16 @@ func (s *Simulator) result() *Result {
 			row[20] = strconv.Itoa(r.maxCoRiders)
 			waits = append(waits, wait)
 		}
+		tripDistance := r.odometerAtDropoff - r.odometerAtPickup
+		if len(r.legs) > 0 {
+			tripDistance = 0
+			for _, leg := range r.legs {
+				tripDistance += leg.distanceMeters
+			}
+		}
 		switch r.status {
 		case model.StatusCompleted:
 			completed++
-			tripDistance := r.odometerAtDropoff - r.odometerAtPickup
 			row[14] = formatInt(tripDistance)
 			row[15] = formatInt(*r.dropoffAt - *r.pickupAt)
 			ratio := 1.0
@@ -111,13 +140,31 @@ func (s *Simulator) result() *Result {
 			detourSum += ratio
 			row[18] = formatRatio(ratio)
 		case model.StatusCanceled:
-			if r.cancelReason == "max_request_to_assignment" {
+			switch r.cancelReason {
+			case "max_request_to_assignment":
 				canceledAssignment++
-			} else {
+			case "max_handoff_wait":
+				canceledHandoff++
+			default:
 				canceledPickup++
 			}
 		default:
 			unserved++
+		}
+		if s.settings.HandoffsEnabled {
+			row = append(row, strconv.Itoa(r.handoffCount), formatInt(r.totalHandoffWaitSeconds))
+			for i, leg := range r.legs {
+				endLat, endLng := "", ""
+				if leg.dropoffAt != nil {
+					endLat, endLng = formatCoordinate(leg.end.Lat), formatCoordinate(leg.end.Lng)
+				}
+				out.TripLegs = append(out.TripLegs, []string{
+					id, strconv.Itoa(i), leg.supplyID,
+					formatCoordinate(leg.start.Lat), formatCoordinate(leg.start.Lng), endLat, endLng,
+					formatOptional(leg.pickupAt), formatOptional(leg.dropoffAt),
+					formatInt(leg.distanceMeters), formatInt(leg.durationSeconds),
+				})
+			}
 		}
 		out.Trips = append(out.Trips, row)
 	}
@@ -161,11 +208,15 @@ func (s *Simulator) result() *Result {
 	if onlineTotal > 0 {
 		fleetUtilization = formatRatio(float64(onTripTotal) / float64(onlineTotal))
 	}
-	out.RunSummary = [][]string{{strconv.Itoa(completed), strconv.Itoa(canceledAssignment + canceledPickup), strconv.Itoa(canceledAssignment),
+	summary := []string{strconv.Itoa(completed), strconv.Itoa(canceledAssignment + canceledPickup + canceledHandoff), strconv.Itoa(canceledAssignment),
 		strconv.Itoa(canceledPickup), strconv.Itoa(unserved), median, p90, meanDetour, fleetUtilization,
 		strconv.Itoa(s.matcherCalls[model.TriggerRequest]), strconv.Itoa(s.matcherCalls[model.TriggerSupplyOnline]),
 		strconv.Itoa(s.matcherCalls[model.TriggerSupplyOffline]), strconv.Itoa(s.matcherCalls[model.TriggerBatchTick]),
-		formatInt(s.matcherElapsed.Microseconds()), formatInt(s.routerElapsed.Microseconds())}}
+		formatInt(s.matcherElapsed.Microseconds()), formatInt(s.routerElapsed.Microseconds())}
+	if s.settings.HandoffsEnabled {
+		summary = append(summary, strconv.Itoa(canceledHandoff))
+	}
+	out.RunSummary = [][]string{summary}
 	return out
 }
 

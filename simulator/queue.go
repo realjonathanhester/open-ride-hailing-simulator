@@ -10,6 +10,7 @@ const (
 	eventDwellDone
 	eventAssignmentDeadline
 	eventPickupDeadline
+	eventHandoffDeadline
 	eventSupplyOnline
 	eventRequest
 	eventBatchTick

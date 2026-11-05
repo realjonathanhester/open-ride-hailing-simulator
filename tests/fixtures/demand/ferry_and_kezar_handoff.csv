@@ -1,0 +1,3 @@
+request_id,requested_at,origin_lat,origin_lng,destination_lat,destination_lng,num_requested_seats,max_request_to_assignment_seconds,max_request_to_pickup_seconds
+ferry_building_to_coit_tower,1767225660,37.795490,-122.393680,37.802395,-122.405822,1,,
+kezar_stadium_to_coit_tower,1767225660,37.767263,-122.456743,37.802395,-122.405822,1,,

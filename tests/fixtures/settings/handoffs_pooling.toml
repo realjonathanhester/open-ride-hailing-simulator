@@ -1,0 +1,15 @@
+# Handoffs with pooling for capacity-across-handoff cases
+[simulation]
+pooling_enabled = true
+reassignment_enabled = true
+handoffs_enabled = true
+batch_matching_interval_seconds = 60
+pickup_dwell_seconds = 0
+dropoff_dwell_seconds = 0
+default_num_requested_seats = 1
+default_num_available_seats = 1
+average_speed_meters_per_second = 10.0
+
+[hooks]
+matching = "capacity_handoff_matcher"
+routing = "straight_line"

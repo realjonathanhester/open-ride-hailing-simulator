@@ -22,6 +22,8 @@ type file struct {
 		DefaultNumAvailableSeats      *int     `toml:"default_num_available_seats"`
 		AverageSpeedMetersPerSecond   *float64 `toml:"average_speed_meters_per_second"`
 		Timezone                      string   `toml:"timezone"`
+		HandoffsEnabled               *bool    `toml:"handoffs_enabled"`
+		MaxHandoffWaitSeconds         *int64   `toml:"max_handoff_wait_seconds"`
 	} `toml:"simulation"`
 	Hooks struct {
 		Matching       string `toml:"matching"`
@@ -118,6 +120,15 @@ func (r Reader) ReadSettings() (model.Settings, error) {
 	}
 	if s.AverageSpeedMetersPerSecond != nil {
 		out.AverageSpeedMetersPerSecond = *s.AverageSpeedMetersPerSecond
+	}
+	if s.HandoffsEnabled != nil {
+		out.HandoffsEnabled = *s.HandoffsEnabled
+	}
+	if s.MaxHandoffWaitSeconds != nil {
+		if *s.MaxHandoffWaitSeconds <= 0 {
+			return model.Settings{}, fmt.Errorf("%s: max_handoff_wait_seconds must be positive", r.Path)
+		}
+		out.MaxHandoffWaitSeconds = s.MaxHandoffWaitSeconds
 	}
 	return out, nil
 }
