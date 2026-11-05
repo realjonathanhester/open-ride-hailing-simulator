@@ -41,6 +41,57 @@ Knowing the upper bound tells you whether a feature is worth building before any
 
 Matching algorithms are usually evaluated on private data with private tooling. An open, deterministic simulator with plugin readers, writers and matchers gives researchers and engineers a common place to compare ideas and reproduce each other's results.
 
+## Inputs and outputs
+
+The two input files stand in for what the mobile apps produce when people press buttons: each row of `requests.csv` is a rider tapping Request, and each row of `supply.csv` is a driver tapping Go Online and later Go Offline. The simulator matches riders to cars and moves each car along its route, producing the position updates a driver app would send as GPS pings. The output files record what happened from the rider's point of view (`trips.csv`) and from the supply's point of view (`supply_event_log.csv` and `supply_summary.csv`), along with `run_summary.csv` and `run_metadata.csv`. Those files feed `rhs view`, a graphical interface for exploring and comparing runs.
+
+```mermaid
+flowchart LR
+    subgraph inputs["Inputs: button presses in the mobile apps"]
+        direction TB
+        subgraph riderApp["📱 Rider app"]
+            requests["requests.csv<br/>rider taps Request"]
+        end
+        subgraph driverApp["🚗 Driver app"]
+            supply["supply.csv<br/>driver taps Go Online / Go Offline"]
+        end
+    end
+
+    subgraph core["Simulator core: rhs run"]
+        direction TB
+        settings["settings.toml<br/>chooses plugins under hooks"]
+        matching["Matching plugin<br/>returns supply/demand assignments"]
+        routing["Routing and interpolation engine<br/>straight_line or osrm<br/>mimics driver app GPS pings:<br/>car positions moving along routes"]
+        behavior["Driver behavior plugin<br/>supply positioning, accept model"]
+        settings --> matching
+        settings --> routing
+        settings --> behavior
+        matching <--> routing
+        behavior <--> routing
+    end
+
+    subgraph outputs["Outputs: the trips that happened"]
+        direction TB
+        trips["Rider view: trips.csv<br/>waits, pickups, dropoffs, cancellations"]
+        supplyOut["Supply view: supply_event_log.csv, supply_summary.csv<br/>states, empty and loaded driving, utilization"]
+        meta["run_summary.csv, run_metadata.csv"]
+    end
+
+    subgraph tooling["Tooling: rhs view graphical interface"]
+        direction TB
+        pages["Dashboard · Trips · Supply · Playback · Run comparison"]
+    end
+
+    requests --> core
+    supply --> core
+    core --> trips
+    core --> supplyOut
+    core --> meta
+    trips --> tooling
+    supplyOut --> tooling
+    meta --> tooling
+```
+
 ## Usage
 
 Requires Go 1.22 or newer.
