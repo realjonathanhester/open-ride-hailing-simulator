@@ -18,10 +18,10 @@ FINISH_BUFFER_SECONDS = 60 * 60
 SEED = 20161001
 REQUEST_COUNT = 100
 # Fraction of the source cars-per-request ratio kept in the sample. 1.0 reproduces the source ratio
-# (143 shifts, cars about 12% busy). 0.6 was picked by a straight-line sweep as the least aggressive
-# cut that roughly doubles utilization while staying clear of the cancellation cliff below 0.5.
+# (143 shifts, cars about 12% busy). 0.5 was chosen by Jonathan from a straight-line sweep (see README):
+# it is the lowest scale that still serves all 100 requests, just above the cancellation cliff at 0.4.
 # Requests are drawn before supply, so changing this never changes requests.csv.
-SUPPLY_SCALE = 0.6
+SUPPLY_SCALE = 0.5
 
 def read(path):
     with open(path, newline="") as f:

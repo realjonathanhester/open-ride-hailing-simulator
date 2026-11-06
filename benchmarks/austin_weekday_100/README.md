@@ -8,12 +8,12 @@ Built only from `benchmarks/austin_weekday_10k/requests.csv` and `supply.csv`. S
 ## Method (build.py, seed 20161001)
 1. Window: 18:30 to 19:00 local time (epoch 1767832200 to 1767834000). It is the busiest 30-minute window in the 10k scenario, with 358 requests.
 2. Demand: 100 of those 358 requests are drawn uniformly without replacement with a fixed seed, so the geographic spread and the time of day inside the window follow the source. Origins, destinations and columns are unchanged.
-3. Supply: 545 car shifts are online at some point from 18:15 (window start minus a 15-minute lead) to 19:00. Each one is kept with probability `SUPPLY_SCALE` × 100 / 358, with `SUPPLY_SCALE = 0.6` (0.76 cars per request in the sample, against 1.52 in the source). Kept shifts are clipped so they go online no earlier than 18:15 and offline no later than 20:00 (window end plus a 1-hour buffer for trips to finish).
+3. Supply: 545 car shifts are online at some point from 18:15 (window start minus a 15-minute lead) to 19:00. Each one is kept with probability `SUPPLY_SCALE` × 100 / 358, with `SUPPLY_SCALE = 0.5` (0.57 cars per request in the sample, against 1.52 in the source). Kept shifts are clipped so they go online no earlier than 18:15 and offline no later than 20:00 (window end plus a 1-hour buffer for trips to finish).
 4. Extra columns are passed through unchanged, as in the 10k scenario.
 
 ## Stats
 - Requests: 100. REGULAR 96, SUV 3, LUXURY 1.
-- Supply: 76 car shifts.
+- Supply: 57 car shifts.
 - Full figures are in build_stats.json.
 
 ## Reference run
@@ -22,7 +22,7 @@ settings.toml is the same as the 10k scenario: `greedy_nearest_eta`, `straight_l
 
 | routing | requests_completed | requests_canceled | median_wait_seconds | p90_wait_seconds | fleet_utilization | wall time |
 |---|---|---|---|---|---|---|
-| straight_line | 100 | 0 | 254 | 480 | 0.222032 | about 0.1 s |
+| straight_line | 100 | 0 | 416 | 781 | 0.277394 | about 0.1 s |
 | osrm (Austin, no candidate pruning, no cache) — stale, measured on the old 143-shift supply, not rerun | 99 | 1 | 200 | 458 | 0.090035 | about 17 s |
 
 ## Supply scale
@@ -39,7 +39,7 @@ At the source ratio (`SUPPLY_SCALE = 1.0`, 143 shifts) cars were only about 12% 
 | 0.4 | 45 | 84 | 16 | 783 | 1057 | 0.285 |
 | 0.3 | 30 | 39 | 61 | 686 | 1163 | 0.211 |
 
-0.6 is used: it roughly doubles utilization and keeps every request served with waits under 10 minutes at p90, with a margin above the cancellation cliff that starts below 0.5. Utilization cannot get much past 0.28 at any scale, because shifts stay online until 20:00 while demand stops at 19:00.
+0.5 is used (chosen by Jonathan): it is the lowest scale that still serves all 100 requests, more than doubling utilization, just above the cancellation cliff at 0.4. Utilization cannot get much past 0.28 at any scale, because shifts stay online until 20:00 while demand stops at 19:00.
 
 ## Caveats
 Same as the 10k scenario. In addition, cars that were online before 18:15 start at their real shift start location rather than wherever they were at 18:15, and the clipped shift end can force cars offline while demand outside the window is not simulated.
