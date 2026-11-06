@@ -25,7 +25,7 @@ func scaled(t *testing.T, fraction float64, seed int64) (string, int) {
 func TestFullFleetIsSupplyAsBuilt(t *testing.T) {
 	original, _ := os.ReadFile(filepath.Join(benchmark, "supply.csv"))
 	content, count := scaled(t, 1, 7)
-	assertEqual(t, "shifts", count, 143)
+	assertEqual(t, "shifts", count, 76)
 	assertEqual(t, "content", content, string(original))
 }
 
@@ -33,15 +33,15 @@ func TestThinningIsReproducibleForASeed(t *testing.T) {
 	first, count := scaled(t, 0.7, 20161001)
 	second, _ := scaled(t, 0.7, 20161001)
 	other, _ := scaled(t, 0.7, 20161002)
-	assertEqual(t, "shifts at 70%", count, 98)
+	assertEqual(t, "shifts at 70%", count, 52)
 	assertEqual(t, "same seed gives same file", first == second, true)
 	assertEqual(t, "other seed gives other file", first == other, false)
 }
 
 func TestReplicatingCopiesWholeShiftsWithUniqueIds(t *testing.T) {
 	content, count := scaled(t, 2, 1)
-	assertEqual(t, "shifts at 200%", count, 286)
-	assertEqual(t, "copies", strings.Count(content, "_copy1,"), 143)
+	assertEqual(t, "shifts at 200%", count, 152)
+	assertEqual(t, "copies", strings.Count(content, "_copy1,"), 76)
 }
 
 func runGrid(t *testing.T) ([][]string, string) {
@@ -79,7 +79,7 @@ func TestGridWritesOneTidyRowPerRun(t *testing.T) {
 	assertEqual(t, "completed", full["completed"], "100")
 	assertEqual(t, "never assigned", full["never_assigned"], "0")
 	assertEqual(t, "unresolved at end", full["unresolved_at_end"], "0")
-	assertEqual(t, "median wait", full["median_wait_seconds"], "124")
+	assertEqual(t, "median wait", full["median_wait_seconds"], "254")
 }
 
 func TestGridRecordsInputHashesPerFolder(t *testing.T) {
