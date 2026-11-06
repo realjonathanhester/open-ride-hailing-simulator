@@ -99,7 +99,7 @@ Cases 1 and 4 are the **exhaustive output tests**: they assert every field of ev
 - **Fixtures:** `base_default.toml`, `one_car_at_kezar_stadium.csv`, `single_trip.csv`
 - **Trip `kezar_stadium_to_coit_tower`:** `status = completed`, `requested_at = T+60`, `num_requested_seats = 1`, `first_assigned_at = assigned_at = T+60`, `supply_id = car_at_kezar_stadium`, `reassign_count = 0`, `ridepool_type = p0d0`, `eta_at_assignment_seconds = 0`, `driver_arrived_at = pickup_at = T+60`, `dropoff_at = T+654`, `wait_seconds = 0`, `trip_distance_meters = 5940`, `trip_duration_seconds = 594`, `direct_distance_meters = 5940`, `direct_duration_seconds = 594`, `detour_ratio = 1.0`, `pickup_distance_meters = 0`, `max_co_riders = 0`, `canceled_at` and `cancel_reason` empty.
 - **Event log:** `online` (T), `plan_updated` (T+60), `arrived_pickup` (T+60), `pickup` (T+60), `arrived_dropoff` (T+654), `dropoff` (T+654), `idle` (T+654), each with `lat`, `lng`, `state_after`, `request_id`, `plan_id`, `seats_in_use` and `odometer_meters` (0 until the dropoff rows, then 5940). The polyline and `plan` cells match the router output.
-- **Supply summary:** `online_at = T`, `offline_at` empty, `idle_seconds = 60`, `en_route_seconds = 0`, `on_trip_seconds = 594`, `idle_meters = 0`, `en_route_meters = 0`, `on_trip_meters = 5940`, `requests_served = 1`, `utilization = 594 / 654`, `deadhead_ratio = 0`, `full_polyline` from Kezar Stadium to Coit Tower.
+- **Supply summary:** `online_at = T`, `offline_at = T+654` (every request is resolved, so the run stops and the car goes `offline`; the event log ends with that `offline` row), `idle_seconds = 60`, `en_route_seconds = 0`, `on_trip_seconds = 594`, `idle_meters = 0`, `en_route_meters = 0`, `on_trip_meters = 5940`, `requests_served = 1`, `utilization = 594 / 654`, `deadhead_ratio = 0`, `full_polyline` from Kezar Stadium to Coit Tower.
 - **Run metadata:** `simulator_version`, the three SHA-256 hashes, `settings` JSON, `simulation_start_at = T+60`, `simulation_end_at = T+654`.
 - **Run summary:** 1 completed, 0 canceled, median and p90 wait 0, mean detour ratio 1.0, 1 matcher call with trigger `request` (plus 0 for each other trigger).
 
@@ -159,7 +159,7 @@ Same-input determinism for pooling is case 16 (`same_inputs_give_identical_outpu
 ### 8. `rider_cancels_when_pickup_takes_too_long`
 
 - **Fixtures:** `short_pickup_timeout.toml`, `one_car_at_ferry_building.csv`, `single_trip.csv`
-- **Assert:** `cancel_reason = max_request_to_pickup`, `canceled_at = T+360`. The car logs `stop_removed` then `idle` at T+360.
+- **Assert:** `cancel_reason = max_request_to_pickup`, `canceled_at = T+360`. The car logs `stop_removed`, `idle`, then `offline` (early stop) at T+360, and `simulation_end_at = T+360`.
 
 ### 9. `per_request_pickup_limit_overrides_setting`
 
@@ -206,9 +206,13 @@ Same-input determinism for pooling is case 16 (`same_inputs_give_identical_outpu
 - **Fixtures:** `pooling_enabled.toml` and `base_default.toml`, each with `one_car_at_kezar_stadium.csv` and `simple_pool.csv`
 - **Assert:** `requests_sha256` and `supply_sha256` match across the two runs; `settings_sha256` differs.
 
+### Early stop
+
+`tests/early_stop_test.go` covers `stop_when_requests_resolved` (default true): the run ends at the last dropoff or cancellation and every online car's log ends with `offline` at or before `simulation_end_at`; it does not stop during a lull before a later request, while a reassigned request is in flight, or while a rider is `waiting_for_handoff`; a repositioning car is cut off where it is (`return_to_origin_stop_early.toml`); the viewer loads the outputs; and no requests at all is still an input error.
+
 ### Driver behavior
 
-Cases 18 to 23 are in `tests/driver_behavior_test.go`. `return_to_origin.toml` is `base_default.toml` plus `driver_behavior = "return_to_origin"` under `[hooks]`, and `simple_driver_behavior.toml` is `base_default.toml` plus `driver_behavior = "simple"` under `[hooks]`.
+Cases 18 to 23 are in `tests/driver_behavior_test.go`. `return_to_origin.toml` is `base_default.toml` plus `driver_behavior = "return_to_origin"` under `[hooks]` and `stop_when_requests_resolved = false` (so the run keeps going after the last trip), and `simple_driver_behavior.toml` is `base_default.toml` plus `driver_behavior = "simple"` under `[hooks]`.
 
 ### 18. `simple_driver_behavior_is_the_default`
 

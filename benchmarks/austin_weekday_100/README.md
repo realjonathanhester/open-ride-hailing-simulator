@@ -22,12 +22,14 @@ settings.toml is the same as the 10k scenario: `greedy_nearest_eta`, `straight_l
 
 | routing | requests_completed | requests_canceled | median_wait_seconds | p90_wait_seconds | fleet_utilization | wall time |
 |---|---|---|---|---|---|---|
-| straight_line | 100 | 0 | 416 | 781 | 0.277394 | about 0.1 s |
-| osrm (Austin, no candidate pruning, no cache) — stale, measured on the old 143-shift supply, not rerun | 99 | 1 | 200 | 458 | 0.090035 | about 17 s |
+| straight_line | 100 | 0 | 416 | 781 | 0.295777 | about 0.1 s |
+| osrm (Austin, no candidate pruning, no cache) — stale, measured on the old 143-shift supply and before the early stop, not rerun | 99 | 1 | 200 | 458 | 0.090035 | about 17 s |
+
+The run ends at 19:49:45 local time, when the last request is resolved (`stop_when_requests_resolved`, on by default), and cars still online go offline then. Without the early stop it ran to 20:00 with fleet_utilization 0.277394; trips and waits are unchanged.
 
 ## Supply scale
 
-At the source ratio (`SUPPLY_SCALE = 1.0`, 143 shifts) cars were only about 12% busy. A straight-line sweep of `build.py --supply-scale` on this benchmark (same seed; requests.csv is identical at every scale):
+At the source ratio (`SUPPLY_SCALE = 1.0`, 143 shifts) cars were only about 12% busy. A straight-line sweep (run before the early stop, so utilization there runs to 20:00) of `build.py --supply-scale` on this benchmark (same seed; requests.csv is identical at every scale):
 
 | scale | shifts | completed | canceled | median wait s | p90 wait s | fleet_utilization |
 |---|---|---|---|---|---|---|
@@ -39,7 +41,7 @@ At the source ratio (`SUPPLY_SCALE = 1.0`, 143 shifts) cars were only about 12% 
 | 0.4 | 45 | 84 | 16 | 783 | 1057 | 0.285 |
 | 0.3 | 30 | 39 | 61 | 686 | 1163 | 0.211 |
 
-0.5 is used (chosen by Jonathan): it is the lowest scale that still serves all 100 requests, more than doubling utilization, just above the cancellation cliff at 0.4. Utilization cannot get much past 0.28 at any scale, because shifts stay online until 20:00 while demand stops at 19:00.
+0.5 is used (chosen by Jonathan): it is the lowest scale that still serves all 100 requests, more than doubling utilization, just above the cancellation cliff at 0.4. Without the early stop, utilization cannot get much past 0.28 at any scale, because shifts stay online until 20:00 while demand stops at 19:00; the early stop now ends the run at the last dropoff.
 
 ## Caveats
 Same as the 10k scenario. In addition, cars that were online before 18:15 start at their real shift start location rather than wherever they were at 18:15, and the clipped shift end can force cars offline while demand outside the window is not simulated.

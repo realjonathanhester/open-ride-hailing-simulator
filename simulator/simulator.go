@@ -139,6 +139,8 @@ type Simulator struct {
 	lastProgressAt time.Time
 	horizonAt      int64
 
+	// resolvedRequests counts requests that reached completed or canceled.
+	resolvedRequests int
 }
 
 // New creates a simulator with the given hooks.
@@ -336,6 +338,7 @@ func (s *Simulator) Run(requests []model.Request, supplies []model.Supply) (*Res
 		s.push(&event{at: s.startAt + *interval, priority: priorityBatchTick, id: "batch_tick", kind: eventBatchTick})
 	}
 	s.endAt = s.startAt
+	stoppedEarly := false
 
 	for s.queue.Len() > 0 {
 		e := heap.Pop(&s.queue).(*event)
@@ -352,12 +355,20 @@ func (s *Simulator) Run(requests []model.Request, supplies []model.Supply) (*Res
 		}
 		s.apply(e)
 		s.reportProgress(false)
+		if s.settings.StopWhenRequestsResolved && s.allRequestsResolved() {
+			stoppedEarly = true
+			break
+		}
 	}
 	s.reportProgress(true)
 	for _, id := range s.carOrder {
 		if c := s.cars[id]; c.online && !c.offline {
 			s.now = s.endAt
-			s.sync(c)
+			if stoppedEarly {
+				s.goOffline(c) // close out supply at the early end
+			} else {
+				s.sync(c)
+			}
 		}
 	}
 	result := s.result()
@@ -391,6 +402,13 @@ func (s *Simulator) isLive(e *event) bool {
 		return !s.cars[e.id].offline
 	}
 	return true
+}
+
+// allRequestsResolved reports whether every request has arrived and is
+// completed or canceled, so nothing can happen to riders any more. Both
+// statuses are final and only reached after arrival, so a counter suffices.
+func (s *Simulator) allRequestsResolved() bool {
+	return s.resolvedRequests == len(s.requests)
 }
 
 func (s *Simulator) hasLiveWork() bool {
@@ -704,6 +722,7 @@ func (s *Simulator) finishStop(c *car) {
 		delete(c.aboard, stop.RequestID)
 		c.seatsInUse -= stop.seats
 		r.dropoffAt, r.status = &at, model.StatusCompleted
+		s.resolvedRequests++
 		r.odometerAtDropoff = c.baseOdometer
 		r.ridepoolType = ridepoolType(c.actions[r.actionIndexAtAssign:], stop.RequestID)
 		if len(r.legs) > 0 {
@@ -811,6 +830,7 @@ func (s *Simulator) cancel(r *request, reason string) {
 	previous := r.status
 	supplyID := r.supplyID
 	r.status, r.canceledAt, r.cancelReason = model.StatusCanceled, &at, reason
+	s.resolvedRequests++
 	r.handoffDeadline = nil
 	r.handoffLocation = nil
 	r.supplyID = ""

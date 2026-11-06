@@ -7,6 +7,8 @@ dropoff_dwell_seconds = 0
 default_num_requested_seats = 1
 default_num_available_seats = 4
 average_speed_meters_per_second = 10.0
+# These cases check repositioning after the last trip, so keep running.
+stop_when_requests_resolved = false
 
 [hooks]
 matching = "reference_test_matcher"

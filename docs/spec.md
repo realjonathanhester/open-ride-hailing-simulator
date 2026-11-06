@@ -58,6 +58,7 @@ Replay a time-ordered sequence of rideshare requests against a fleet of supply (
 | `timezone` | IANA zone name | none | Display only: the zone where the scenario takes place, such as `America/Chicago`. Never changes the simulation. Recorded in run metadata so tools can show local wall-clock times. An unknown name (or `Local`) is an error |
 | `handoffs_enabled` | bool | false | Turns on generic mid-trip handoff primitives (optional stop locations, `waiting_for_handoff`, linked-batch validation, `trip_legs.csv`). Left out of the settings JSON when false so existing hashes stay the same |
 | `max_handoff_wait_seconds` | seconds | none (off) | Deadline from each handoff dropoff until the next actual pickup, covering `waiting_for_handoff` and the assigned / `driver_arrived` onward states. Does not reuse `max_request_to_pickup_seconds` |
+| `stop_when_requests_resolved` | bool | true | Ends the run as soon as every request has arrived and is `completed` or `canceled` (none `requested`, `assigned`, `driver_arrived`, `on_trip` or `waiting_for_handoff`, and no request still to come). Every car still online then goes `offline` at that time, so `offline_at`, idle time and distance, utilization and `simulation_end_at` stop there. False runs until the event queue is empty (cars stay online until their own `offline_at`), exactly as before the setting existed. Always recorded in the settings JSON |
 
 The settings file is TOML. It also names the matching hook, the driver behavior plugin (`[hooks] driver_behavior`, default `simple`), the routing hook, and the reader and writer plugins along with their options, such as file paths or a database connection.
 
@@ -259,7 +260,7 @@ Plugins must be deterministic: the same inputs give the same answers, with no wa
 - **Arrival.** At the end of the route it logs `reposition_arrived` (`state_after = idle`) and `on_idle` is called again. A reposition arrival sorts with dropoffs in the tie-break.
 - **Assignable.** A repositioning car is open to the matcher on every call, including batch ticks. The matcher sees `state = repositioning`, its interpolated location and an empty plan, so its ETAs are measured from where the car is now. Any accepted plan change ends the reposition at that point and routes from there. The `plan_updated` row's `driven_polyline` shows how far it got. Pooling, reassignment and batching rules don't change, because a repositioning car never has stops.
 - **Going offline.** If `offline_at` arrives while the car is repositioning, its plan is empty, so it goes `offline` immediately at its interpolated position, as an idle car would. A `going_offline` car never repositions.
-- **Accounting.** Repositioning time and distance count as idle (`idle_seconds`, `idle_meters`) and as deadhead. Reposition arrivals are internal events, so they never call the matcher, and they keep the run going. `simulation_end_at` includes a final return trip.
+- **Accounting.** Repositioning time and distance count as idle (`idle_seconds`, `idle_meters`) and as deadhead. Reposition arrivals are internal events, so they never call the matcher, and they keep the run going. With `stop_when_requests_resolved = false`, `simulation_end_at` includes a final return trip; with the default early stop the run ends at the last dropoff or cancellation and a repositioning car goes offline wherever it is then.
 - **Router errors.** If the router can't route the reposition, the car logs `reposition_rejected` and stays idle.
 
 ### Registering external hooks
@@ -378,7 +379,7 @@ Identifies the run so two runs can be compared as a pair.
 | `settings_sha256` | SHA-256 of `settings` |
 | `settings` | The settings the run actually used, defaults filled in, as JSON. Reader and writer paths are left out so moving files doesn't change the hash. `driver_behavior_hook` is included only when it isn't the default `simple`, and `timezone` only when set |
 | `simulation_start_at` | Simulated clock start: the first `requested_at` |
-| `simulation_end_at` | Simulated time of the last processed event (batch ticks excluded) |
+| `simulation_end_at` | Simulated time of the last processed event (batch ticks excluded). With `stop_when_requests_resolved` (default) this is when the last request was resolved |
 | `timezone` | Optional, last column: the `[simulation] timezone` setting. The column is written only when the setting is set, so runs without it keep the same columns and bytes |
 
 Two runs are **paired** when `requests_sha256` and `supply_sha256` match. A different `settings_sha256` is expected when comparing strategies.
@@ -415,7 +416,7 @@ _Pooling on_
 | T2 | R2 requested, O2 to D2 | S1 is interpolated to L2. The matcher sees S1's plan with ETAs and returns [pickup R1, dropoff R1, pickup R2, dropoff R2]. The router is called again from L2 |
 | Every interval | Batch tick | The matcher is called; an empty result changes nothing |
 | T3 to T6 | Arrivals and dwells | Arrival, pickup and dropoff are logged for R1, then for R2, each row with its driven polyline |
-| End | S1's plan is finished and the queue is empty | The outputs are written |
+| End | R1 and R2 are both completed and no request is still to come | S1 goes offline at T6 and the outputs are written (with `stop_when_requests_resolved = false`: once the queue is empty) |
 
 ## Testing
 
