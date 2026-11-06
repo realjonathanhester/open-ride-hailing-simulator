@@ -485,11 +485,12 @@ func (s *Simulator) routePlan(c *car, stops []model.Stop) ([]model.Location, err
 	for i, stop := range routed {
 		waypoints[i] = stop.location
 	}
-	_, err := s.route(start, waypoints)
+	legs, err := s.route(start, waypoints)
 	if err != nil {
 		return nil, err
 	}
-	return append([]model.Location{start}, waypoints...), nil
+	planned, _ := plannedGeometry(start, waypoints, legs)
+	return planned, nil
 }
 
 // installPlan applies a already-validated, already-routable plan to a synced car.

@@ -1,0 +1,16 @@
+# Test-only "manhattan" router (L-shaped road geometry), return_to_origin
+# driver behavior, and no early stop so the car repositions after the trip
+[simulation]
+pooling_enabled = false
+reassignment_enabled = true
+pickup_dwell_seconds = 0
+dropoff_dwell_seconds = 0
+default_num_requested_seats = 1
+default_num_available_seats = 4
+average_speed_meters_per_second = 10.0
+stop_when_requests_resolved = false
+
+[hooks]
+matching = "reference_test_matcher"
+driver_behavior = "return_to_origin"
+routing = "manhattan"
