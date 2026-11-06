@@ -1,0 +1,16 @@
+# return_to_origin driver behavior with the early stop on
+[simulation]
+pooling_enabled = false
+reassignment_enabled = true
+pickup_dwell_seconds = 0
+dropoff_dwell_seconds = 0
+default_num_requested_seats = 1
+default_num_available_seats = 4
+average_speed_meters_per_second = 10.0
+# The default early stop, spelled out: end as soon as every request is resolved.
+stop_when_requests_resolved = true
+
+[hooks]
+matching = "reference_test_matcher"
+driver_behavior = "return_to_origin"
+routing = "straight_line"

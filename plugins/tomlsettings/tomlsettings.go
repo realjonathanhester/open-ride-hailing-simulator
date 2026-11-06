@@ -24,6 +24,7 @@ type file struct {
 		Timezone                      string   `toml:"timezone"`
 		HandoffsEnabled               *bool    `toml:"handoffs_enabled"`
 		MaxHandoffWaitSeconds         *int64   `toml:"max_handoff_wait_seconds"`
+		StopWhenRequestsResolved      *bool    `toml:"stop_when_requests_resolved"`
 	} `toml:"simulation"`
 	Hooks struct {
 		Matching       string `toml:"matching"`
@@ -77,6 +78,7 @@ func (r Reader) ReadSettings() (model.Settings, error) {
 		DefaultNumRequestedSeats:      4,
 		DefaultNumAvailableSeats:      4,
 		AverageSpeedMetersPerSecond:   10.0,
+		StopWhenRequestsResolved:      true,
 		MatchingHook:                  orDefault(f.Hooks.Matching, "greedy_nearest_eta"),
 		RoutingHook:                   orDefault(f.Hooks.Routing, "straight_line"),
 		OSRM: model.OSRMSettings{
@@ -138,6 +140,9 @@ func (r Reader) ReadSettings() (model.Settings, error) {
 	}
 	if s.AverageSpeedMetersPerSecond != nil {
 		out.AverageSpeedMetersPerSecond = *s.AverageSpeedMetersPerSecond
+	}
+	if s.StopWhenRequestsResolved != nil {
+		out.StopWhenRequestsResolved = *s.StopWhenRequestsResolved
 	}
 	if s.HandoffsEnabled != nil {
 		out.HandoffsEnabled = *s.HandoffsEnabled

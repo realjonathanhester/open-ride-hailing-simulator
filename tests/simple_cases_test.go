@@ -55,7 +55,9 @@ func TestSingleTripFromCarAtOrigin(t *testing.T) {
 
 	summary := o.supplySummary("car_at_kezar_stadium")
 	assertEquals(t, summary["online_at"], at(0))
-	assertEquals(t, summary["offline_at"], "")
+	// Every request is resolved at the dropoff, so the run ends and the car
+	// goes offline then.
+	assertEquals(t, summary["offline_at"], at(654))
 	assertEquals(t, summary["idle_seconds"], "60")
 	assertEquals(t, summary["en_route_seconds"], "0")
 	assertEquals(t, summary["on_trip_seconds"], "594")

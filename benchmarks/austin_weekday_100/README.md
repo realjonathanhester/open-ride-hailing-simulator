@@ -22,8 +22,10 @@ settings.toml is the same as the 10k scenario: `greedy_nearest_eta`, `straight_l
 
 | routing | requests_completed | requests_canceled | median_wait_seconds | p90_wait_seconds | fleet_utilization | wall time |
 |---|---|---|---|---|---|---|
-| straight_line | 100 | 0 | 124 | 285 | 0.117586 | about 0.1 s |
-| osrm (Austin, no candidate pruning, no cache) | 99 | 1 | 200 | 458 | 0.090035 | about 17 s |
+| straight_line | 100 | 0 | 124 | 285 | 0.136835 | about 0.1 s |
+| osrm (Austin, no candidate pruning, no cache) — stale, predates the early stop | 99 | 1 | 200 | 458 | 0.090035 | about 17 s |
+
+The run ends at 19:38:27 local time, when the last request is resolved (`stop_when_requests_resolved`, on by default), and cars still online go offline then. Before that setting existed it ran to the last shift end at 20:00 with fleet_utilization 0.117586; trips and waits are unchanged. The OSRM row has not been rerun since and its fleet_utilization is stale.
 
 ## Caveats
 Same as the 10k scenario. In addition, cars that were online before 18:15 start at their real shift start location rather than wherever they were at 18:15, and the clipped shift end can force cars offline while demand outside the window is not simulated.

@@ -28,6 +28,8 @@ settings.toml: `greedy_nearest_eta`, `straight_line` at 8 m/s, assignment timeou
 |---|---|---|---|---|---|---|---|
 | 9983 | 17 | 17 | 0 | 118 | 420 | 1.000000 | 0.385087 |
 
+This run predates `stop_when_requests_resolved` (on by default), which ends a run when the last request is resolved and takes the remaining cars offline then. It has not been rerun; fleet_utilization may be stale.
+
 ## Caveats
 - The data only contains completed trips, so unfulfilled and canceled demand isn't there.
 - Driver idle time before the first trip and after the last one isn't recorded, so shifts are a lower bound on online time.

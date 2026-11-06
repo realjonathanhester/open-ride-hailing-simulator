@@ -19,6 +19,11 @@ type Settings struct {
 	DefaultNumRequestedSeats      int     `json:"default_num_requested_seats"`
 	DefaultNumAvailableSeats      int     `json:"default_num_available_seats"`
 	AverageSpeedMetersPerSecond   float64 `json:"average_speed_meters_per_second"`
+	// StopWhenRequestsResolved ends the simulation as soon as every request
+	// has arrived and is completed or canceled; cars still online then go
+	// offline at that time. The TOML reader defaults it to true. False keeps
+	// running until the event queue drains (the old behavior).
+	StopWhenRequestsResolved bool `json:"stop_when_requests_resolved"`
 
 	MatchingHook string `json:"matching_hook"`
 	// DriverBehaviorHook names the driver behavior plugin. Empty means the
