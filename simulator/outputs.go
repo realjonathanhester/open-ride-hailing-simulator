@@ -80,12 +80,21 @@ func formatOptional(v *int64) string {
 }
 
 func (s *Simulator) log(c *car, action, requestID string, planned []model.Location) {
-	location, odometer := s.position(c)
+	location, odometer, passed, _ := s.traverse(c)
 	driven := ""
-	if location != c.lastRowLocation {
-		driven = polyline.Encode([]model.Location{c.lastRowLocation, location})
-		c.path = append(c.path, location)
+	// The sub-path driven since the last row: geometry points passed (and
+	// reroute points) in order, then the current location.
+	points := []model.Location{c.lastRowLocation}
+	for _, p := range append(append(append([]model.Location{}, c.trail...), passed...), location) {
+		if p != points[len(points)-1] {
+			points = append(points, p)
+		}
 	}
+	if len(points) > 1 {
+		driven = polyline.Encode(points)
+		c.path = append(c.path, points[1:]...)
+	}
+	c.trail = nil
 	c.lastRowLocation = location
 	plannedCell, planJSON := "", ""
 	if planned != nil {

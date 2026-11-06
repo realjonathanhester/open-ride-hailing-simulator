@@ -33,6 +33,9 @@ type planStop struct {
 	etaAt       int64
 	legDistance int64 // from the previous stop (or the plan start)
 	legDuration int64
+	// path is the leg's road geometry after its start point, ending at
+	// location (just [location] for a straight line).
+	path []model.Location
 }
 
 type request struct {
@@ -87,8 +90,14 @@ type car struct {
 	baseOdometer int64
 	phase        int
 	legRemaining int64 // meters from base to stops[0] while driving
-	legEndAt     int64
-	dwellEndAt   int64
+	// legPath is the rest of the current leg's geometry after baseLocation,
+	// ending at the leg's target. Empty means a straight line to the target.
+	legPath []model.Location
+	// trail holds geometry points passed (and reroute points) since the last
+	// supply event row, for driven_polyline.
+	trail      []model.Location
+	legEndAt   int64
+	dwellEndAt int64
 	// repositionTarget is where the car drives while phaseRepositioning.
 	repositionTarget model.Location
 	stops            []planStop
@@ -489,27 +498,118 @@ func pick(override, setting *int64) *int64 {
 
 // position returns where the car is now and its odometer, without committing.
 func (s *Simulator) position(c *car) (model.Location, int64) {
+	location, odometer, _, _ := s.traverse(c)
+	return location, odometer
+}
+
+// traverse returns where the car is now, its odometer, the leg geometry
+// points it has passed since baseLocation, and the geometry still ahead
+// (after the returned location), without committing. The car moves along
+// the leg geometry by the driven fraction of the leg distance; with a
+// single straight segment this is plain linear interpolation.
+func (s *Simulator) traverse(c *car) (model.Location, int64, []model.Location, []model.Location) {
 	if c.phase != phaseDriving && c.phase != phaseRepositioning {
-		return c.baseLocation, c.baseOdometer
+		return c.baseLocation, c.baseOdometer, nil, c.legPath
 	}
 	to := c.repositionTarget
 	if c.phase == phaseDriving {
 		to = c.stops[0].location
 	}
+	tail := c.legPath
+	if len(tail) == 0 {
+		tail = []model.Location{to}
+	}
 	if s.now >= c.legEndAt || c.legRemaining == 0 {
 		if s.now >= c.legEndAt {
-			return to, c.baseOdometer + c.legRemaining
+			return to, c.baseOdometer + c.legRemaining, tail[:len(tail)-1], nil
 		}
-		return c.baseLocation, c.baseOdometer
+		return c.baseLocation, c.baseOdometer, nil, tail
 	}
 	elapsed := s.now - c.baseAt
 	duration := c.legEndAt - c.baseAt
 	driven := int64(math.Round(float64(c.legRemaining) * float64(elapsed) / float64(duration)))
 	fraction := float64(driven) / float64(c.legRemaining)
-	return model.Location{
-		Lat: c.baseLocation.Lat + (to.Lat-c.baseLocation.Lat)*fraction,
-		Lng: c.baseLocation.Lng + (to.Lng-c.baseLocation.Lng)*fraction,
-	}, c.baseOdometer + driven
+	location, index := alongPath(c.baseLocation, tail, fraction)
+	return location, c.baseOdometer + driven, tail[:index], tail[index:]
+}
+
+// alongPath returns the point at fraction of the length of the path
+// start, tail..., and how many tail points lie before it.
+func alongPath(start model.Location, tail []model.Location, fraction float64) (model.Location, int) {
+	lerp := func(a, b model.Location, f float64) model.Location {
+		return model.Location{Lat: a.Lat + (b.Lat-a.Lat)*f, Lng: a.Lng + (b.Lng-a.Lng)*f}
+	}
+	if len(tail) == 1 {
+		return lerp(start, tail[0], fraction), 0
+	}
+	lengths := make([]float64, len(tail))
+	total := 0.0
+	from := start
+	for i, to := range tail {
+		lengths[i] = planarMeters(from, to)
+		total += lengths[i]
+		from = to
+	}
+	target := fraction * total
+	from = start
+	for i, to := range tail {
+		if lengths[i] > 0 && target <= lengths[i] {
+			return lerp(from, to, target/lengths[i]), i
+		}
+		target -= lengths[i]
+		from = to
+	}
+	return tail[len(tail)-1], len(tail) - 1
+}
+
+// planarMeters is an equirectangular distance, used only to split a leg's
+// distance along its geometry.
+func planarMeters(a, b model.Location) float64 {
+	const metersPerDegree = 111319.49
+	x := (b.Lng - a.Lng) * math.Cos((a.Lat+b.Lat)/2*math.Pi/180) * metersPerDegree
+	y := (b.Lat - a.Lat) * metersPerDegree
+	return math.Hypot(x, y)
+}
+
+// legGeometry returns a routed leg's geometry after from, ending at to.
+func legGeometry(from, to model.Location, leg model.Leg) []model.Location {
+	var points []model.Location
+	for _, segment := range leg.Segments {
+		for _, p := range segment.Polyline {
+			if len(points) == 0 && p == from {
+				continue
+			}
+			if len(points) > 0 && points[len(points)-1] == p {
+				continue
+			}
+			points = append(points, p)
+		}
+	}
+	if len(points) == 0 || points[len(points)-1] != to {
+		points = append(points, to)
+	}
+	return points
+}
+
+// plannedGeometry is start followed by every routed leg's geometry.
+func plannedGeometry(start model.Location, waypoints []model.Location, legs []model.Leg) ([]model.Location, [][]model.Location) {
+	planned := []model.Location{start}
+	paths := make([][]model.Location, len(waypoints))
+	from := start
+	for i, to := range waypoints {
+		paths[i] = legGeometry(from, to, legs[i])
+		planned = append(planned, paths[i]...)
+		from = to
+	}
+	return planned, paths
+}
+
+// startLeg begins driving a leg from the car's (synced) base location.
+func (c *car) startLeg(distance, endAt int64, path []model.Location) {
+	c.legRemaining, c.legEndAt, c.legPath = distance, endAt, path
+	if n := len(c.trail); n == 0 || c.trail[n-1] != c.baseLocation {
+		c.trail = append(c.trail, c.baseLocation) // a turn point when rerouting mid-leg
+	}
 }
 
 func (c *car) class() int {
@@ -542,13 +642,15 @@ func (c *car) state() string {
 
 // sync commits the car's movement and time up to now.
 func (s *Simulator) sync(c *car) {
-	location, odometer := s.position(c)
+	location, odometer, passed, rest := s.traverse(c)
 	class := c.class()
 	c.classMeters[class] += odometer - c.baseOdometer
 	c.classSeconds[class] += s.now - c.accountedAt
 	c.accountedAt = s.now
 	if c.phase == phaseDriving || c.phase == phaseRepositioning {
 		c.legRemaining -= odometer - c.baseOdometer
+		c.trail = append(c.trail, passed...)
+		c.legPath = rest
 	}
 	c.baseLocation, c.baseAt, c.baseOdometer = location, s.now, odometer
 }
@@ -586,8 +688,10 @@ func (s *Simulator) replan(c *car, stops []model.Stop) ([]model.Location, error)
 	if err != nil {
 		return nil, err
 	}
+	planned, paths := plannedGeometry(start, waypoints, legs)
 	for i := range routed {
 		routed[i].legDistance, routed[i].legDuration = legs[i].DistanceMeters, legs[i].DurationSeconds
+		routed[i].path = paths[i]
 		clock += legs[i].DurationSeconds
 		routed[i].etaAt = clock
 		clock += s.dwell(routed[i].Type)
@@ -601,10 +705,11 @@ func (s *Simulator) replan(c *car, stops []model.Stop) ([]model.Location, error)
 		c.planID = fmt.Sprintf("%s_plan_%d", c.input.SupplyID, c.planCount)
 	}
 	if c.phase != phaseDwelling && len(newStops) > 0 {
-		c.phase, c.legRemaining, c.legEndAt = phaseDriving, newStops[0].legDistance, s.now+newStops[0].legDuration
+		c.phase = phaseDriving
+		c.startLeg(newStops[0].legDistance, s.now+newStops[0].legDuration, newStops[0].path)
 	}
 	s.schedule(c)
-	return append([]model.Location{start}, waypoints...), nil
+	return planned, nil
 }
 
 func (s *Simulator) schedule(c *car) {
@@ -666,7 +771,8 @@ func (s *Simulator) finishStop(c *car) {
 		c.version++
 		if len(c.stops) > 0 {
 			next := c.stops[0]
-			c.phase, c.legRemaining, c.legEndAt = phaseDriving, next.legDistance, s.now+next.legDuration
+			c.phase = phaseDriving
+			c.startLeg(next.legDistance, s.now+next.legDuration, next.path)
 			s.schedule(c)
 			return
 		}
@@ -737,7 +843,8 @@ func (s *Simulator) finishStop(c *car) {
 	c.version++
 	if len(c.stops) > 0 {
 		next := c.stops[0]
-		c.phase, c.legRemaining, c.legEndAt = phaseDriving, next.legDistance, s.now+next.legDuration
+		c.phase = phaseDriving
+		c.startLeg(next.legDistance, s.now+next.legDuration, next.path)
 		s.schedule(c)
 		return
 	}
@@ -782,10 +889,11 @@ func (s *Simulator) reposition(c *car) {
 		return
 	}
 	c.phase, c.repositionTarget = phaseRepositioning, *target
-	c.legRemaining, c.legEndAt = legs[0].DistanceMeters, s.now+legs[0].DurationSeconds
+	planned, paths := plannedGeometry(c.baseLocation, []model.Location{*target}, legs)
+	c.startLeg(legs[0].DistanceMeters, s.now+legs[0].DurationSeconds, paths[0])
 	c.version++
 	s.push(&event{at: c.legEndAt, priority: priorityDropoff, id: c.input.SupplyID, kind: eventArrive, version: c.version})
-	s.log(c, "reposition_started", "", []model.Location{c.baseLocation, *target})
+	s.log(c, "reposition_started", "", planned)
 }
 
 func (s *Simulator) arriveReposition(c *car) {

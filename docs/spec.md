@@ -277,7 +277,7 @@ Hooks are chosen by name from a registry in `runner`. An external package can ca
 6. **Route.** For each changed plan, call the router from the current location, replace the route, recompute waypoint ETAs, and reschedule arrival events. Stale ones are cancelled.
 7. **Terminate.** Stop once every supply plan is finished and no requests, arrivals or deadlines remain. Batch ticks alone don't keep the run going. Then write the outputs.
 
-> **Interpolation:** To place a car at time t, find the route segment that contains the time elapsed since the route started, then interpolate linearly along that segment's polyline by distance. During a dwell, the car stays at the stop.
+> **Interpolation:** A car drives each leg at constant speed: after t of the leg's duration it has driven the same fraction of the leg's `distance_meters` (rounded to whole meters, which is what the odometer and supply meters count). It is placed at that fraction of the length of the leg's geometry (the segments' polylines joined, measured point to point), interpolating linearly within the polyline piece it falls on. When the car is synced mid-leg (a reroute, a cancellation, any committed position), the rest of the leg continues from that point along the remaining geometry. The geometry only places the car; distances and durations always come from the router's legs. With a single straight segment (the straight-line router) this is plain linear interpolation between the stops. During a dwell, the car stays at the stop.
 
 ## Outputs
 
@@ -341,8 +341,8 @@ Non-handoff-configured runs omit these columns and `trip_legs.csv`, so existing 
 | `plan_id` | Current plan |
 | `seats_in_use` | Seats in use after the action |
 | `odometer_meters` | Total distance driven so far |
-| `driven_polyline` | The path actually driven since this car's previous row |
-| `planned_polyline` | On `plan_updated` and `reposition_started` rows: the full new route from the router |
+| `driven_polyline` | The path actually driven since this car's previous row: the previous row's location, every route-geometry point passed (and the point where it was rerouted, if any), then this row's location. Empty if the car didn't move |
+| `planned_polyline` | On `plan_updated` and `reposition_started` rows: the full new route from the router, every leg's geometry joined, starting at the car's current location (or the stop it is dwelling at) |
 | `plan` | On `plan_updated` rows: the new plan's stops with their ETAs |
 
 ### 3. Supply summary (one row per supply)
@@ -361,7 +361,7 @@ Non-handoff-configured runs omit these columns and `trip_legs.csv`, so existing 
 | `requests_served` | Requests completed |
 | `utilization` | `on_trip_seconds` divided by time online |
 | `deadhead_ratio` | Distance driven with no rider aboard divided by total distance |
-| `full_polyline` | The car's whole driven path |
+| `full_polyline` | The car's whole driven path: its online location followed by every row's `driven_polyline` points, joints not repeated |
 
 ### 4. Run summary
 

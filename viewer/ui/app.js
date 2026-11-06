@@ -186,6 +186,22 @@ const iconAnchors = { origin: [14, 34], destination: [6, 34], car: [11, 17] };
 const svgURL = svg => "data:image/svg+xml;charset=UTF-8," + encodeURIComponent(svg);
 function carColor(state, riders) { return state === "on_trip" && riders >= 2 ? "#17602f" : stateColors[state] || "#444"; }
 // heading in degrees clockwise from north, in lat/lng space corrected for latitude.
+// The point at fraction f of a path's length, and the piece it lies on.
+function alongPath(points, f) {
+  const len = (a, b) => Math.hypot((b.lng - a.lng) * Math.cos(a.lat * Math.PI / 180), b.lat - a.lat);
+  const lengths = points.slice(1).map((q, i) => len(points[i], q));
+  let target = f * lengths.reduce((n, x) => n + x, 0);
+  for (let i = 0; i < lengths.length; i++) {
+    const a = points[i], b = points[i + 1];
+    if (lengths[i] > 0 && (target <= lengths[i] || i === lengths.length - 1)) {
+      const g = Math.min(1, target / lengths[i]);
+      return [{ lat: a.lat + (b.lat - a.lat) * g, lng: a.lng + (b.lng - a.lng) * g }, a, b];
+    }
+    target -= lengths[i];
+  }
+  const a = points[0], b = points[points.length - 1];
+  return [{ lat: a.lat + (b.lat - a.lat) * f, lng: a.lng + (b.lng - a.lng) * f }, a, b];
+}
 function heading(from, to) {
   const dx = (to.lng - from.lng) * Math.cos(from.lat * Math.PI / 180), dy = to.lat - from.lat;
   if (Math.abs(dx) < 1e-12 && Math.abs(dy) < 1e-12) return null;
@@ -544,8 +560,8 @@ async function playbackView(query) {
       const seg = car.segments.find(s => s.start_at <= now && now < s.end_at) || car.segments.find(s => s.start_at <= now && now <= s.end_at);
       if (!seg) continue;
       const f = seg.end_at > seg.start_at ? (now - seg.start_at) / (seg.end_at - seg.start_at) : 0;
-      const p = { lat: seg.from.lat + (seg.to.lat - seg.from.lat) * f, lng: seg.from.lng + (seg.to.lng - seg.from.lng) * f };
-      const h = heading(seg.from, seg.to);
+      const [p, a, b] = alongPath(seg.path || [seg.from, seg.to], f);
+      const h = heading(a, b);
       if (h !== null) headings.set(car.supply_id, h);
       const rotation = headings.get(car.supply_id) || 0, color = carColor(seg.state, seg.riders_aboard);
       byState[seg.state] = (byState[seg.state] || 0) + 1;

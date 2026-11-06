@@ -4,6 +4,7 @@ import (
 	"sort"
 
 	"github.com/realjonathanhester/ride-hailing-simulator/model"
+	"github.com/realjonathanhester/ride-hailing-simulator/polyline"
 )
 
 // Playback window sizes in simulated seconds (tooling spec section 6).
@@ -20,6 +21,10 @@ type CarSegment struct {
 	To           model.Location `json:"to"`
 	State        string         `json:"state"`
 	RidersAboard int            `json:"riders_aboard"`
+	// Path is the road geometry driven from From to To (the next row's
+	// driven_polyline), set only when it has bends; playback moves the car
+	// along it. Absent means a straight line.
+	Path []model.Location `json:"path,omitempty"`
 }
 
 // PlaybackCar is one car's segments in a playback window.
@@ -82,10 +87,15 @@ func (r *Run) playbackIndex() *playbackIndex {
 				here := location(event)
 				var end int64
 				var there *model.Location
+				var path []model.Location
 				if k+1 < len(rows) {
 					next := r.Events[rows[k+1]]
 					end, _ = integer(next, "at")
 					there = location(next)
+					if points := polyline.Decode(next["driven_polyline"]); len(points) > 2 && there != nil && here != nil {
+						// Exact endpoints, encoded (1e-5) bends in between.
+						path = append(append([]model.Location{*here}, points[1:len(points)-1]...), *there)
+					}
 				} else if event["state_after"] != "offline" {
 					end, there = r.endAt(), here
 				}
@@ -98,7 +108,7 @@ func (r *Run) playbackIndex() *playbackIndex {
 				if here == nil || there == nil || end <= start {
 					continue
 				}
-				car.Segments = append(car.Segments, CarSegment{StartAt: start, EndAt: end, From: *here, To: *there, State: event["state_after"], RidersAboard: aboard})
+				car.Segments = append(car.Segments, CarSegment{StartAt: start, EndAt: end, From: *here, To: *there, State: event["state_after"], RidersAboard: aboard, Path: path})
 			}
 			index.cars = append(index.cars, car)
 		}
