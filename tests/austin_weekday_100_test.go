@@ -23,7 +23,7 @@ func TestAustinWeekday100BenchmarkRuns(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertEquals(t, strconv.Itoa(len(requests)), "100")
-	assertEquals(t, strconv.Itoa(len(supply)), "76")
+	assertEquals(t, strconv.Itoa(len(supply)), "57")
 
 	directory := t.TempDir()
 	_, err = runner.RunFiles(filepath.Join(benchmark, "settings.toml"), runner.Paths{
@@ -44,6 +44,6 @@ func TestAustinWeekday100BenchmarkRuns(t *testing.T) {
 	assertEquals(t, summary["requests_completed"], "100")
 	assertEquals(t, summary["requests_canceled"], "0")
 	assertEquals(t, summary["requests_unserved"], "0")
-	assertEquals(t, summary["median_wait_seconds"], "254")
-	assertEquals(t, summary["p90_wait_seconds"], "480")
+	assertEquals(t, summary["median_wait_seconds"], "416")
+	assertEquals(t, summary["p90_wait_seconds"], "781")
 }
