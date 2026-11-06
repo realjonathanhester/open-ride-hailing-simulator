@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/BurntSushi/toml"
 )
 
 const benchmark = "../../benchmarks/austin_weekday_100"
@@ -103,6 +105,101 @@ func record(rows [][]string, index int) map[string]string {
 		out[column] = rows[index][i]
 	}
 	return out
+}
+
+
+func TestWriteSettingsPreservesMatchingKeys(t *testing.T) {
+	directory := t.TempDir()
+	source := filepath.Join(directory, "source.toml")
+	content := strings.Join([]string{
+		"[simulation]",
+		"pooling_enabled = true",
+		"reassignment_enabled = false",
+		"",
+		"[hooks]",
+		`matching = "transfermatcher"`,
+		`routing = "straight_line"`,
+		"",
+		"[matching]",
+		"transfers_enabled = true",
+		"max_rider_path_ratio = 1.25",
+		"max_insertion_evaluations = 5000",
+		"max_candidate_cars = 99",
+		"",
+	}, "\n")
+	if err := os.WriteFile(source, []byte(content), 0o644); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+	base := map[string]any{}
+	if _, err := toml.DecodeFile(source, &base); err != nil {
+		t.Fatalf("decode source: %v", err)
+	}
+	out := filepath.Join(directory, "settings.toml")
+	if err := writeSettings(base, out, true, 10); err != nil {
+		t.Fatalf("write settings: %v", err)
+	}
+	written := map[string]any{}
+	if _, err := toml.DecodeFile(out, &written); err != nil {
+		t.Fatalf("decode written: %v", err)
+	}
+	matching, ok := written["matching"].(map[string]any)
+	if !ok {
+		t.Fatalf("matching section type = %T, want map", written["matching"])
+	}
+	simulation := written["simulation"].(map[string]any)
+	assertEqual(t, "reassignment override", simulation["reassignment_enabled"].(bool), true)
+	assertEqual(t, "transfers_enabled kept", matching["transfers_enabled"].(bool), true)
+	assertEqual(t, "max_rider_path_ratio kept", matching["max_rider_path_ratio"].(float64), 1.25)
+	assertEqual(t, "max_insertion_evaluations kept", matching["max_insertion_evaluations"].(int64), int64(5000))
+	assertEqual(t, "max_candidate_cars overridden", matching["max_candidate_cars"].(int64), int64(10))
+	assertEqual(t, "matching key count", len(matching), 4)
+}
+
+func TestWriteSettingsControlMatchingOnlyAddsCandidateCars(t *testing.T) {
+	directory := t.TempDir()
+	source := filepath.Join(directory, "source.toml")
+	content := strings.Join([]string{
+		"[simulation]",
+		"pooling_enabled = true",
+		"reassignment_enabled = true",
+		"",
+		"[hooks]",
+		`matching = "greedy_nearest_eta"`,
+		`routing = "straight_line"`,
+		"",
+	}, "\n")
+	if err := os.WriteFile(source, []byte(content), 0o644); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+	base := map[string]any{}
+	if _, err := toml.DecodeFile(source, &base); err != nil {
+		t.Fatalf("decode source: %v", err)
+	}
+	out := filepath.Join(directory, "settings.toml")
+	if err := writeSettings(base, out, false, 10); err != nil {
+		t.Fatalf("write settings: %v", err)
+	}
+	written := map[string]any{}
+	if _, err := toml.DecodeFile(out, &written); err != nil {
+		t.Fatalf("decode written: %v", err)
+	}
+	matching, ok := written["matching"].(map[string]any)
+	if !ok {
+		t.Fatalf("matching section type = %T, want map", written["matching"])
+	}
+	simulation := written["simulation"].(map[string]any)
+	hooks := written["hooks"].(map[string]any)
+	assertEqual(t, "control matching key count", len(matching), 1)
+	assertEqual(t, "control max_candidate_cars", matching["max_candidate_cars"].(int64), int64(10))
+	_, hasTransfers := matching["transfers_enabled"]
+	_, hasRatio := matching["max_rider_path_ratio"]
+	_, hasBudget := matching["max_insertion_evaluations"]
+	assertEqual(t, "control has no transfers_enabled", hasTransfers, false)
+	assertEqual(t, "control has no max_rider_path_ratio", hasRatio, false)
+	assertEqual(t, "control has no max_insertion_evaluations", hasBudget, false)
+	assertEqual(t, "control reassignment override", simulation["reassignment_enabled"].(bool), false)
+	assertEqual(t, "control matcher hook", hooks["matching"].(string), "greedy_nearest_eta")
+	assertEqual(t, "control routing hook", hooks["routing"].(string), "straight_line")
 }
 
 func assertEqual[T comparable](t *testing.T, what string, got, want T) {

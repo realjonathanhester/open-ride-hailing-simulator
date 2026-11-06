@@ -159,7 +159,14 @@ func writeSettings(base map[string]any, path string, reassignment bool, maxCandi
 	}
 	simulation["reassignment_enabled"] = reassignment
 	settings["simulation"] = simulation
-	settings["matching"] = map[string]any{"max_candidate_cars": maxCandidates}
+	matching := map[string]any{}
+	if existing, ok := base["matching"].(map[string]any); ok {
+		for key, value := range existing {
+			matching[key] = value
+		}
+	}
+	matching["max_candidate_cars"] = maxCandidates
+	settings["matching"] = matching
 	file, err := os.Create(path)
 	if err != nil {
 		return err
